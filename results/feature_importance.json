@@ -1,0 +1,758 @@
+[
+  {
+    "feature": "right_ankle_max_x",
+    "importance": 0.036578
+  },
+  {
+    "feature": "right_hip_mean_x",
+    "importance": 0.035088
+  },
+  {
+    "feature": "sequence_length",
+    "importance": 0.031679
+  },
+  {
+    "feature": "right_hip_vel_mean",
+    "importance": 0.031564
+  },
+  {
+    "feature": "right_ankle_mean_x",
+    "importance": 0.029966
+  },
+  {
+    "feature": "left_hip_vel_mean",
+    "importance": 0.026565
+  },
+  {
+    "feature": "left_knee_vel_mean",
+    "importance": 0.025999
+  },
+  {
+    "feature": "left_elbow_vel_mean",
+    "importance": 0.024086
+  },
+  {
+    "feature": "left_shoulder_vel_mean",
+    "importance": 0.021139
+  },
+  {
+    "feature": "left_hip_mean_x",
+    "importance": 0.019732
+  },
+  {
+    "feature": "right_elbow_vel_mean",
+    "importance": 0.018665
+  },
+  {
+    "feature": "left_hip_range_x",
+    "importance": 0.018478
+  },
+  {
+    "feature": "right_knee_max_x",
+    "importance": 0.013523
+  },
+  {
+    "feature": "left_hip_min_x",
+    "importance": 0.012754
+  },
+  {
+    "feature": "left_hip_vel_std",
+    "importance": 0.012363
+  },
+  {
+    "feature": "right_shoulder_angle_range",
+    "importance": 0.012109
+  },
+  {
+    "feature": "right_hip_vel_std",
+    "importance": 0.01174
+  },
+  {
+    "feature": "right_hip_max_x",
+    "importance": 0.011658
+  },
+  {
+    "feature": "right_hip_std_y",
+    "importance": 0.011356
+  },
+  {
+    "feature": "left_wrist_vel_mean",
+    "importance": 0.011354
+  },
+  {
+    "feature": "right_knee_mean_x",
+    "importance": 0.011266
+  },
+  {
+    "feature": "right_elbow_vel_std",
+    "importance": 0.011156
+  },
+  {
+    "feature": "left_hip_max_x",
+    "importance": 0.010615
+  },
+  {
+    "feature": "left_ankle_vel_mean",
+    "importance": 0.009824
+  },
+  {
+    "feature": "right_elbow_max_x",
+    "importance": 0.009731
+  },
+  {
+    "feature": "right_shoulder_angle_max",
+    "importance": 0.009488
+  },
+  {
+    "feature": "left_hip_vel_max",
+    "importance": 0.009267
+  },
+  {
+    "feature": "left_wrist_min_x",
+    "importance": 0.008916
+  },
+  {
+    "feature": "left_hip_range_y",
+    "importance": 0.008339
+  },
+  {
+    "feature": "right_knee_mean_y",
+    "importance": 0.007821
+  },
+  {
+    "feature": "right_elbow_angle_mean",
+    "importance": 0.007463
+  },
+  {
+    "feature": "right_knee_angle_min",
+    "importance": 0.007277
+  },
+  {
+    "feature": "right_shoulder_angle_mean",
+    "importance": 0.006655
+  },
+  {
+    "feature": "right_ankle_max_y",
+    "importance": 0.006517
+  },
+  {
+    "feature": "right_wrist_max_y",
+    "importance": 0.006305
+  },
+  {
+    "feature": "right_wrist_vel_std",
+    "importance": 0.006296
+  },
+  {
+    "feature": "right_wrist_vel_mean",
+    "importance": 0.006269
+  },
+  {
+    "feature": "right_hip_std_x",
+    "importance": 0.00609
+  },
+  {
+    "feature": "left_knee_std_x",
+    "importance": 0.006075
+  },
+  {
+    "feature": "right_ankle_min_x",
+    "importance": 0.006055
+  },
+  {
+    "feature": "right_elbow_min_y",
+    "importance": 0.006029
+  },
+  {
+    "feature": "right_shoulder_vel_mean",
+    "importance": 0.006021
+  },
+  {
+    "feature": "left_shoulder_angle_std",
+    "importance": 0.006005
+  },
+  {
+    "feature": "left_shoulder_angle_max",
+    "importance": 0.005769
+  },
+  {
+    "feature": "right_shoulder_max_y",
+    "importance": 0.005675
+  },
+  {
+    "feature": "left_elbow_angle_min",
+    "importance": 0.005659
+  },
+  {
+    "feature": "right_elbow_range_y",
+    "importance": 0.005605
+  },
+  {
+    "feature": "right_ankle_range_x",
+    "importance": 0.005197
+  },
+  {
+    "feature": "left_elbow_mean_x",
+    "importance": 0.004922
+  },
+  {
+    "feature": "left_knee_max_x",
+    "importance": 0.004897
+  },
+  {
+    "feature": "right_hip_min_x",
+    "importance": 0.004864
+  },
+  {
+    "feature": "right_wrist_min_x",
+    "importance": 0.004845
+  },
+  {
+    "feature": "left_knee_mean_x",
+    "importance": 0.00479
+  },
+  {
+    "feature": "left_wrist_min_y",
+    "importance": 0.004675
+  },
+  {
+    "feature": "right_knee_min_x",
+    "importance": 0.004607
+  },
+  {
+    "feature": "right_wrist_range_y",
+    "importance": 0.004551
+  },
+  {
+    "feature": "right_ankle_mean_y",
+    "importance": 0.004543
+  },
+  {
+    "feature": "upper_lower_movement_ratio",
+    "importance": 0.004523
+  },
+  {
+    "feature": "right_hip_vel_max",
+    "importance": 0.004455
+  },
+  {
+    "feature": "right_wrist_mean_x",
+    "importance": 0.004412
+  },
+  {
+    "feature": "right_wrist_min_y",
+    "importance": 0.004378
+  },
+  {
+    "feature": "right_wrist_max_x",
+    "importance": 0.004325
+  },
+  {
+    "feature": "right_elbow_mean_x",
+    "importance": 0.004323
+  },
+  {
+    "feature": "right_elbow_vel_max",
+    "importance": 0.004321
+  },
+  {
+    "feature": "right_wrist_std_y",
+    "importance": 0.004265
+  },
+  {
+    "feature": "left_shoulder_angle_mean",
+    "importance": 0.004109
+  },
+  {
+    "feature": "right_wrist_mean_y",
+    "importance": 0.004076
+  },
+  {
+    "feature": "right_shoulder_mean_y",
+    "importance": 0.004015
+  },
+  {
+    "feature": "left_hip_mean_y",
+    "importance": 0.004006
+  },
+  {
+    "feature": "right_elbow_mean_y",
+    "importance": 0.004004
+  },
+  {
+    "feature": "right_ankle_std_x",
+    "importance": 0.003965
+  },
+  {
+    "feature": "left_right_symmetry",
+    "importance": 0.00396
+  },
+  {
+    "feature": "left_knee_range_x",
+    "importance": 0.003958
+  },
+  {
+    "feature": "right_knee_max_y",
+    "importance": 0.003924
+  },
+  {
+    "feature": "left_elbow_angle_mean",
+    "importance": 0.00391
+  },
+  {
+    "feature": "left_knee_min_x",
+    "importance": 0.003889
+  },
+  {
+    "feature": "right_ankle_std_y",
+    "importance": 0.003828
+  },
+  {
+    "feature": "right_knee_std_x",
+    "importance": 0.003807
+  },
+  {
+    "feature": "right_hip_range_x",
+    "importance": 0.003716
+  },
+  {
+    "feature": "right_shoulder_range_y",
+    "importance": 0.003701
+  },
+  {
+    "feature": "left_wrist_mean_y",
+    "importance": 0.003698
+  },
+  {
+    "feature": "left_elbow_max_y",
+    "importance": 0.003614
+  },
+  {
+    "feature": "left_hip_std_x",
+    "importance": 0.003498
+  },
+  {
+    "feature": "right_wrist_vel_max",
+    "importance": 0.003496
+  },
+  {
+    "feature": "right_shoulder_max_x",
+    "importance": 0.003489
+  },
+  {
+    "feature": "right_knee_angle_std",
+    "importance": 0.003421
+  },
+  {
+    "feature": "right_shoulder_min_y",
+    "importance": 0.003415
+  },
+  {
+    "feature": "right_knee_angle_range",
+    "importance": 0.003359
+  },
+  {
+    "feature": "right_knee_min_y",
+    "importance": 0.003356
+  },
+  {
+    "feature": "left_elbow_angle_range",
+    "importance": 0.00334
+  },
+  {
+    "feature": "left_knee_angle_min",
+    "importance": 0.003322
+  },
+  {
+    "feature": "left_wrist_std_x",
+    "importance": 0.003285
+  },
+  {
+    "feature": "right_knee_vel_mean",
+    "importance": 0.003247
+  },
+  {
+    "feature": "right_knee_angle_mean",
+    "importance": 0.003243
+  },
+  {
+    "feature": "right_ankle_range_y",
+    "importance": 0.00324
+  },
+  {
+    "feature": "left_knee_std_y",
+    "importance": 0.003191
+  },
+  {
+    "feature": "right_elbow_max_y",
+    "importance": 0.003178
+  },
+  {
+    "feature": "left_elbow_mean_y",
+    "importance": 0.003121
+  },
+  {
+    "feature": "right_elbow_angle_min",
+    "importance": 0.003121
+  },
+  {
+    "feature": "right_ankle_vel_max",
+    "importance": 0.003114
+  },
+  {
+    "feature": "left_shoulder_min_y",
+    "importance": 0.003091
+  },
+  {
+    "feature": "left_ankle_min_x",
+    "importance": 0.003053
+  },
+  {
+    "feature": "right_shoulder_min_x",
+    "importance": 0.003025
+  },
+  {
+    "feature": "right_shoulder_angle_std",
+    "importance": 0.003015
+  },
+  {
+    "feature": "left_wrist_range_y",
+    "importance": 0.002969
+  },
+  {
+    "feature": "left_wrist_std_y",
+    "importance": 0.002965
+  },
+  {
+    "feature": "left_hip_std_y",
+    "importance": 0.002919
+  },
+  {
+    "feature": "left_wrist_max_x",
+    "importance": 0.00289
+  },
+  {
+    "feature": "right_knee_vel_std",
+    "importance": 0.002813
+  },
+  {
+    "feature": "right_shoulder_vel_std",
+    "importance": 0.00281
+  },
+  {
+    "feature": "right_elbow_std_x",
+    "importance": 0.00281
+  },
+  {
+    "feature": "left_elbow_range_x",
+    "importance": 0.002761
+  },
+  {
+    "feature": "right_wrist_std_x",
+    "importance": 0.002747
+  },
+  {
+    "feature": "left_ankle_max_x",
+    "importance": 0.002703
+  },
+  {
+    "feature": "left_ankle_mean_x",
+    "importance": 0.002701
+  },
+  {
+    "feature": "right_elbow_min_x",
+    "importance": 0.002695
+  },
+  {
+    "feature": "right_hip_min_y",
+    "importance": 0.002694
+  },
+  {
+    "feature": "right_elbow_range_x",
+    "importance": 0.002664
+  },
+  {
+    "feature": "left_shoulder_angle_range",
+    "importance": 0.002657
+  },
+  {
+    "feature": "left_ankle_std_x",
+    "importance": 0.002622
+  },
+  {
+    "feature": "right_wrist_range_x",
+    "importance": 0.002569
+  },
+  {
+    "feature": "right_knee_range_x",
+    "importance": 0.002532
+  },
+  {
+    "feature": "left_shoulder_max_x",
+    "importance": 0.002498
+  },
+  {
+    "feature": "left_elbow_range_y",
+    "importance": 0.002486
+  },
+  {
+    "feature": "left_elbow_max_x",
+    "importance": 0.002468
+  },
+  {
+    "feature": "left_knee_max_y",
+    "importance": 0.002421
+  },
+  {
+    "feature": "left_shoulder_max_y",
+    "importance": 0.002421
+  },
+  {
+    "feature": "left_elbow_angle_std",
+    "importance": 0.002398
+  },
+  {
+    "feature": "right_shoulder_vel_max",
+    "importance": 0.002391
+  },
+  {
+    "feature": "left_ankle_mean_y",
+    "importance": 0.002385
+  },
+  {
+    "feature": "right_elbow_std_y",
+    "importance": 0.002379
+  },
+  {
+    "feature": "left_knee_mean_y",
+    "importance": 0.002366
+  },
+  {
+    "feature": "right_knee_range_y",
+    "importance": 0.002331
+  },
+  {
+    "feature": "right_elbow_angle_std",
+    "importance": 0.002317
+  },
+  {
+    "feature": "left_knee_angle_std",
+    "importance": 0.002294
+  },
+  {
+    "feature": "left_shoulder_mean_y",
+    "importance": 0.002255
+  },
+  {
+    "feature": "right_shoulder_angle_min",
+    "importance": 0.002144
+  },
+  {
+    "feature": "right_ankle_min_y",
+    "importance": 0.002123
+  },
+  {
+    "feature": "right_knee_std_y",
+    "importance": 0.002111
+  },
+  {
+    "feature": "left_elbow_angle_max",
+    "importance": 0.00208
+  },
+  {
+    "feature": "left_ankle_vel_std",
+    "importance": 0.002076
+  },
+  {
+    "feature": "left_elbow_min_y",
+    "importance": 0.002039
+  },
+  {
+    "feature": "left_ankle_max_y",
+    "importance": 0.001993
+  },
+  {
+    "feature": "right_hip_max_y",
+    "importance": 0.001989
+  },
+  {
+    "feature": "right_shoulder_mean_x",
+    "importance": 0.001985
+  },
+  {
+    "feature": "left_shoulder_vel_max",
+    "importance": 0.00198
+  },
+  {
+    "feature": "left_elbow_std_x",
+    "importance": 0.001978
+  },
+  {
+    "feature": "left_knee_range_y",
+    "importance": 0.001925
+  },
+  {
+    "feature": "left_shoulder_std_y",
+    "importance": 0.001923
+  },
+  {
+    "feature": "left_ankle_std_y",
+    "importance": 0.001881
+  },
+  {
+    "feature": "left_wrist_max_y",
+    "importance": 0.001817
+  },
+  {
+    "feature": "right_ankle_vel_mean",
+    "importance": 0.001705
+  },
+  {
+    "feature": "left_elbow_vel_std",
+    "importance": 0.001704
+  },
+  {
+    "feature": "right_knee_angle_max",
+    "importance": 0.001673
+  },
+  {
+    "feature": "left_knee_angle_mean",
+    "importance": 0.001639
+  },
+  {
+    "feature": "left_hip_min_y",
+    "importance": 0.001626
+  },
+  {
+    "feature": "left_wrist_mean_x",
+    "importance": 0.001615
+  },
+  {
+    "feature": "right_elbow_angle_max",
+    "importance": 0.001589
+  },
+  {
+    "feature": "left_shoulder_vel_std",
+    "importance": 0.001583
+  },
+  {
+    "feature": "left_wrist_vel_std",
+    "importance": 0.001571
+  },
+  {
+    "feature": "right_shoulder_std_y",
+    "importance": 0.001571
+  },
+  {
+    "feature": "right_shoulder_std_x",
+    "importance": 0.001521
+  },
+  {
+    "feature": "left_knee_vel_max",
+    "importance": 0.001518
+  },
+  {
+    "feature": "left_shoulder_min_x",
+    "importance": 0.001498
+  },
+  {
+    "feature": "left_shoulder_range_x",
+    "importance": 0.001471
+  },
+  {
+    "feature": "left_shoulder_mean_x",
+    "importance": 0.001461
+  },
+  {
+    "feature": "left_shoulder_std_x",
+    "importance": 0.001394
+  },
+  {
+    "feature": "left_shoulder_range_y",
+    "importance": 0.001359
+  },
+  {
+    "feature": "left_ankle_range_x",
+    "importance": 0.001304
+  },
+  {
+    "feature": "right_hip_mean_y",
+    "importance": 0.001286
+  },
+  {
+    "feature": "left_ankle_min_y",
+    "importance": 0.001275
+  },
+  {
+    "feature": "left_elbow_min_x",
+    "importance": 0.001253
+  },
+  {
+    "feature": "left_hip_max_y",
+    "importance": 0.001238
+  },
+  {
+    "feature": "left_elbow_vel_max",
+    "importance": 0.001204
+  },
+  {
+    "feature": "right_ankle_vel_std",
+    "importance": 0.0012
+  },
+  {
+    "feature": "left_shoulder_angle_min",
+    "importance": 0.001149
+  },
+  {
+    "feature": "right_hip_range_y",
+    "importance": 0.00112
+  },
+  {
+    "feature": "left_knee_angle_range",
+    "importance": 0.001096
+  },
+  {
+    "feature": "right_shoulder_range_x",
+    "importance": 0.001093
+  },
+  {
+    "feature": "right_knee_vel_max",
+    "importance": 0.001062
+  },
+  {
+    "feature": "left_ankle_vel_max",
+    "importance": 0.000993
+  },
+  {
+    "feature": "left_wrist_vel_max",
+    "importance": 0.000906
+  },
+  {
+    "feature": "left_knee_vel_std",
+    "importance": 0.000891
+  },
+  {
+    "feature": "left_knee_angle_max",
+    "importance": 0.000884
+  },
+  {
+    "feature": "left_wrist_range_x",
+    "importance": 0.000878
+  },
+  {
+    "feature": "left_knee_min_y",
+    "importance": 0.00067
+  },
+  {
+    "feature": "left_elbow_std_y",
+    "importance": 0.000621
+  },
+  {
+    "feature": "right_elbow_angle_range",
+    "importance": 0.000586
+  },
+  {
+    "feature": "left_ankle_range_y",
+    "importance": 0.000541
+  }
+]

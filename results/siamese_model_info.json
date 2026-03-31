@@ -1,0 +1,16 @@
+{
+  "architecture": "Siamese Transformer",
+  "device": "mps",
+  "embed_dim": 128,
+  "num_heads": 8,
+  "num_layers": 3,
+  "embedding_size": 64,
+  "max_seq_length": 200,
+  "input_dim": 24,
+  "margin": 1.0,
+  "lr": 0.001,
+  "batch_size": 16,
+  "epochs": 100,
+  "pairs_per_epoch": 2000,
+  "total_parameters": 610432
+}

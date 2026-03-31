@@ -1,0 +1,19 @@
+# Virtual environment
+venv/
+
+# Large data files
+data/raw/
+data/thetis/
+data/processed/
+data/preprocessed/
+
+# Model weights
+models/
+
+# Python cache
+__pycache__/
+*.pyc
+.DS_Store
+
+# Results (optional - include if you want)
+# results/

@@ -1,0 +1,68 @@
+{
+  "Random Forest": {
+    "cv_accuracy_mean": 0.9091,
+    "cv_accuracy_std": 0.0303,
+    "cv_scores": [
+      0.9242,
+      0.9091,
+      0.8636,
+      0.9545,
+      0.8939
+    ],
+    "training_accuracy": 1.0,
+    "confusion_matrix": [
+      [
+        144,
+        0
+      ],
+      [
+        0,
+        186
+      ]
+    ]
+  },
+  "SVM": {
+    "cv_accuracy_mean": 0.9364,
+    "cv_accuracy_std": 0.0364,
+    "cv_scores": [
+      0.9697,
+      0.9697,
+      0.8788,
+      0.9545,
+      0.9091
+    ],
+    "training_accuracy": 0.9848,
+    "confusion_matrix": [
+      [
+        142,
+        2
+      ],
+      [
+        3,
+        183
+      ]
+    ]
+  },
+  "KNN": {
+    "cv_accuracy_mean": 0.9152,
+    "cv_accuracy_std": 0.0353,
+    "cv_scores": [
+      0.9697,
+      0.8788,
+      0.8788,
+      0.9394,
+      0.9091
+    ],
+    "training_accuracy": 1.0,
+    "confusion_matrix": [
+      [
+        144,
+        0
+      ],
+      [
+        0,
+        186
+      ]
+    ]
+  }
+}

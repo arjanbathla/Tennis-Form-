@@ -1,0 +1,650 @@
+[
+  {
+    "video": "IMG_0881_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.988,
+    "siamese_distance_min": 0.9727,
+    "siamese_similarity": 37.2,
+    "num_frames": 358
+  },
+  {
+    "video": "IMG_0882_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9835,
+    "siamese_distance_min": 0.9682,
+    "siamese_similarity": 37.4,
+    "num_frames": 386
+  },
+  {
+    "video": "IMG_0883_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.993,
+    "siamese_distance_min": 0.9777,
+    "siamese_similarity": 37.0,
+    "num_frames": 370
+  },
+  {
+    "video": "IMG_0884_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9861,
+    "siamese_distance_min": 0.9708,
+    "siamese_similarity": 37.3,
+    "num_frames": 314
+  },
+  {
+    "video": "IMG_0885_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9878,
+    "siamese_distance_min": 0.9726,
+    "siamese_similarity": 37.2,
+    "num_frames": 330
+  },
+  {
+    "video": "IMG_0886_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9837,
+    "siamese_distance_min": 0.9684,
+    "siamese_similarity": 37.4,
+    "num_frames": 314
+  },
+  {
+    "video": "IMG_0887_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9834,
+    "siamese_distance_min": 0.9681,
+    "siamese_similarity": 37.4,
+    "num_frames": 304
+  },
+  {
+    "video": "IMG_0888_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.979,
+    "siamese_distance_min": 0.9637,
+    "siamese_similarity": 37.6,
+    "num_frames": 262
+  },
+  {
+    "video": "IMG_0889_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9833,
+    "siamese_distance_min": 0.9681,
+    "siamese_similarity": 37.4,
+    "num_frames": 177
+  },
+  {
+    "video": "IMG_0901_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9793,
+    "siamese_distance_min": 0.964,
+    "siamese_similarity": 37.6,
+    "num_frames": 143
+  },
+  {
+    "video": "IMG_0902_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9867,
+    "siamese_distance_min": 0.9714,
+    "siamese_similarity": 37.3,
+    "num_frames": 370
+  },
+  {
+    "video": "IMG_0903_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9794,
+    "siamese_distance_min": 0.9642,
+    "siamese_similarity": 37.6,
+    "num_frames": 419
+  },
+  {
+    "video": "IMG_0909_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9771,
+    "siamese_distance_min": 0.9618,
+    "siamese_similarity": 37.6,
+    "num_frames": 257
+  },
+  {
+    "video": "IMG_0911_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9813,
+    "siamese_distance_min": 0.966,
+    "siamese_similarity": 37.5,
+    "num_frames": 371
+  },
+  {
+    "video": "IMG_0912_preprocessed",
+    "folder": "forehand_tennis_with_ball",
+    "siamese_distance_avg": 0.9794,
+    "siamese_distance_min": 0.9641,
+    "siamese_similarity": 37.6,
+    "num_frames": 339
+  },
+  {
+    "video": "IMG_0829_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9834,
+    "siamese_distance_min": 0.9681,
+    "siamese_similarity": 37.4,
+    "num_frames": 390
+  },
+  {
+    "video": "IMG_0830_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9798,
+    "siamese_distance_min": 0.9645,
+    "siamese_similarity": 37.5,
+    "num_frames": 313
+  },
+  {
+    "video": "IMG_0832_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9793,
+    "siamese_distance_min": 0.9641,
+    "siamese_similarity": 37.6,
+    "num_frames": 335
+  },
+  {
+    "video": "IMG_0833_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9835,
+    "siamese_distance_min": 0.9682,
+    "siamese_similarity": 37.4,
+    "num_frames": 371
+  },
+  {
+    "video": "IMG_0834_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9807,
+    "siamese_distance_min": 0.9654,
+    "siamese_similarity": 37.5,
+    "num_frames": 390
+  },
+  {
+    "video": "IMG_0835_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9792,
+    "siamese_distance_min": 0.9639,
+    "siamese_similarity": 37.6,
+    "num_frames": 357
+  },
+  {
+    "video": "IMG_0836_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9788,
+    "siamese_distance_min": 0.9636,
+    "siamese_similarity": 37.6,
+    "num_frames": 376
+  },
+  {
+    "video": "IMG_0837_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9794,
+    "siamese_distance_min": 0.9641,
+    "siamese_similarity": 37.6,
+    "num_frames": 382
+  },
+  {
+    "video": "IMG_0839_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9793,
+    "siamese_distance_min": 0.964,
+    "siamese_similarity": 37.6,
+    "num_frames": 435
+  },
+  {
+    "video": "IMG_0864_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9803,
+    "siamese_distance_min": 0.965,
+    "siamese_similarity": 37.5,
+    "num_frames": 412
+  },
+  {
+    "video": "IMG_0865_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9859,
+    "siamese_distance_min": 0.9706,
+    "siamese_similarity": 37.3,
+    "num_frames": 412
+  },
+  {
+    "video": "IMG_0866_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9831,
+    "siamese_distance_min": 0.9679,
+    "siamese_similarity": 37.4,
+    "num_frames": 254
+  },
+  {
+    "video": "IMG_0867_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9775,
+    "siamese_distance_min": 0.9622,
+    "siamese_similarity": 37.6,
+    "num_frames": 406
+  },
+  {
+    "video": "IMG_0868_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9883,
+    "siamese_distance_min": 0.973,
+    "siamese_similarity": 37.2,
+    "num_frames": 355
+  },
+  {
+    "video": "IMG_0869_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9776,
+    "siamese_distance_min": 0.9623,
+    "siamese_similarity": 37.6,
+    "num_frames": 319
+  },
+  {
+    "video": "IMG_0870_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9837,
+    "siamese_distance_min": 0.9684,
+    "siamese_similarity": 37.4,
+    "num_frames": 312
+  },
+  {
+    "video": "IMG_0872_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9799,
+    "siamese_distance_min": 0.9646,
+    "siamese_similarity": 37.5,
+    "num_frames": 384
+  },
+  {
+    "video": "IMG_0873_preprocessed",
+    "folder": "forehand_tennis_without_ball",
+    "siamese_distance_avg": 0.9821,
+    "siamese_distance_min": 0.9668,
+    "siamese_similarity": 37.5,
+    "num_frames": 334
+  },
+  {
+    "video": "IMG_0890_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9781,
+    "siamese_distance_min": 0.9628,
+    "siamese_similarity": 37.6,
+    "num_frames": 315
+  },
+  {
+    "video": "IMG_0891_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9752,
+    "siamese_distance_min": 0.9599,
+    "siamese_similarity": 37.7,
+    "num_frames": 320
+  },
+  {
+    "video": "IMG_0892_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9745,
+    "siamese_distance_min": 0.9592,
+    "siamese_similarity": 37.7,
+    "num_frames": 290
+  },
+  {
+    "video": "IMG_0893_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9722,
+    "siamese_distance_min": 0.9569,
+    "siamese_similarity": 37.8,
+    "num_frames": 333
+  },
+  {
+    "video": "IMG_0894_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9732,
+    "siamese_distance_min": 0.9579,
+    "siamese_similarity": 37.8,
+    "num_frames": 329
+  },
+  {
+    "video": "IMG_0895_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9745,
+    "siamese_distance_min": 0.9593,
+    "siamese_similarity": 37.7,
+    "num_frames": 295
+  },
+  {
+    "video": "IMG_0896_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9805,
+    "siamese_distance_min": 0.9652,
+    "siamese_similarity": 37.5,
+    "num_frames": 360
+  },
+  {
+    "video": "IMG_0897_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.974,
+    "siamese_distance_min": 0.9587,
+    "siamese_similarity": 37.8,
+    "num_frames": 444
+  },
+  {
+    "video": "IMG_0898_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9753,
+    "siamese_distance_min": 0.96,
+    "siamese_similarity": 37.7,
+    "num_frames": 357
+  },
+  {
+    "video": "IMG_0899_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9818,
+    "siamese_distance_min": 0.9665,
+    "siamese_similarity": 37.5,
+    "num_frames": 264
+  },
+  {
+    "video": "IMG_0904_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9764,
+    "siamese_distance_min": 0.9611,
+    "siamese_similarity": 37.7,
+    "num_frames": 315
+  },
+  {
+    "video": "IMG_0905_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.975,
+    "siamese_distance_min": 0.9597,
+    "siamese_similarity": 37.7,
+    "num_frames": 303
+  },
+  {
+    "video": "IMG_0906_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9758,
+    "siamese_distance_min": 0.9606,
+    "siamese_similarity": 37.7,
+    "num_frames": 319
+  },
+  {
+    "video": "IMG_0907_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9779,
+    "siamese_distance_min": 0.9626,
+    "siamese_similarity": 37.6,
+    "num_frames": 325
+  },
+  {
+    "video": "IMG_0908_preprocessed",
+    "folder": "backhand_tennis_with_ball",
+    "siamese_distance_avg": 0.9774,
+    "siamese_distance_min": 0.9621,
+    "siamese_similarity": 37.6,
+    "num_frames": 333
+  },
+  {
+    "video": "IMG_0821_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9798,
+    "siamese_distance_min": 0.9645,
+    "siamese_similarity": 37.5,
+    "num_frames": 515
+  },
+  {
+    "video": "IMG_0822_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9801,
+    "siamese_distance_min": 0.9648,
+    "siamese_similarity": 37.5,
+    "num_frames": 309
+  },
+  {
+    "video": "IMG_0823_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9798,
+    "siamese_distance_min": 0.9645,
+    "siamese_similarity": 37.5,
+    "num_frames": 269
+  },
+  {
+    "video": "IMG_0824_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9857,
+    "siamese_distance_min": 0.9704,
+    "siamese_similarity": 37.3,
+    "num_frames": 371
+  },
+  {
+    "video": "IMG_0825_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9863,
+    "siamese_distance_min": 0.971,
+    "siamese_similarity": 37.3,
+    "num_frames": 323
+  },
+  {
+    "video": "IMG_0826_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9813,
+    "siamese_distance_min": 0.966,
+    "siamese_similarity": 37.5,
+    "num_frames": 292
+  },
+  {
+    "video": "IMG_0827_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.98,
+    "siamese_distance_min": 0.9648,
+    "siamese_similarity": 37.5,
+    "num_frames": 264
+  },
+  {
+    "video": "IMG_0831_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9764,
+    "siamese_distance_min": 0.9611,
+    "siamese_similarity": 37.7,
+    "num_frames": 251
+  },
+  {
+    "video": "IMG_0840_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9803,
+    "siamese_distance_min": 0.965,
+    "siamese_similarity": 37.5,
+    "num_frames": 353
+  },
+  {
+    "video": "IMG_0841_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9797,
+    "siamese_distance_min": 0.9644,
+    "siamese_similarity": 37.5,
+    "num_frames": 318
+  },
+  {
+    "video": "IMG_0842_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9861,
+    "siamese_distance_min": 0.9709,
+    "siamese_similarity": 37.3,
+    "num_frames": 299
+  },
+  {
+    "video": "IMG_0843_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9771,
+    "siamese_distance_min": 0.9619,
+    "siamese_similarity": 37.6,
+    "num_frames": 268
+  },
+  {
+    "video": "IMG_0844_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9844,
+    "siamese_distance_min": 0.9691,
+    "siamese_similarity": 37.4,
+    "num_frames": 304
+  },
+  {
+    "video": "IMG_0845_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9796,
+    "siamese_distance_min": 0.9643,
+    "siamese_similarity": 37.5,
+    "num_frames": 284
+  },
+  {
+    "video": "IMG_0846_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.986,
+    "siamese_distance_min": 0.9707,
+    "siamese_similarity": 37.3,
+    "num_frames": 307
+  },
+  {
+    "video": "IMG_0847_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9734,
+    "siamese_distance_min": 0.9581,
+    "siamese_similarity": 37.8,
+    "num_frames": 163
+  },
+  {
+    "video": "IMG_0848_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.979,
+    "siamese_distance_min": 0.9637,
+    "siamese_similarity": 37.6,
+    "num_frames": 353
+  },
+  {
+    "video": "IMG_0849_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9761,
+    "siamese_distance_min": 0.9609,
+    "siamese_similarity": 37.7,
+    "num_frames": 294
+  },
+  {
+    "video": "IMG_0850_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9772,
+    "siamese_distance_min": 0.9619,
+    "siamese_similarity": 37.6,
+    "num_frames": 330
+  },
+  {
+    "video": "IMG_0851_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9763,
+    "siamese_distance_min": 0.961,
+    "siamese_similarity": 37.7,
+    "num_frames": 291
+  },
+  {
+    "video": "IMG_0852_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9771,
+    "siamese_distance_min": 0.9618,
+    "siamese_similarity": 37.6,
+    "num_frames": 241
+  },
+  {
+    "video": "IMG_0853_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9756,
+    "siamese_distance_min": 0.9603,
+    "siamese_similarity": 37.7,
+    "num_frames": 204
+  },
+  {
+    "video": "IMG_0854_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9771,
+    "siamese_distance_min": 0.9618,
+    "siamese_similarity": 37.6,
+    "num_frames": 310
+  },
+  {
+    "video": "IMG_0855_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9793,
+    "siamese_distance_min": 0.964,
+    "siamese_similarity": 37.6,
+    "num_frames": 378
+  },
+  {
+    "video": "IMG_0856_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9779,
+    "siamese_distance_min": 0.9626,
+    "siamese_similarity": 37.6,
+    "num_frames": 410
+  },
+  {
+    "video": "IMG_0857_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.979,
+    "siamese_distance_min": 0.9637,
+    "siamese_similarity": 37.6,
+    "num_frames": 187
+  },
+  {
+    "video": "IMG_0858_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9798,
+    "siamese_distance_min": 0.9645,
+    "siamese_similarity": 37.5,
+    "num_frames": 298
+  },
+  {
+    "video": "IMG_0859_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9772,
+    "siamese_distance_min": 0.9619,
+    "siamese_similarity": 37.6,
+    "num_frames": 311
+  },
+  {
+    "video": "IMG_0860_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.977,
+    "siamese_distance_min": 0.9618,
+    "siamese_similarity": 37.6,
+    "num_frames": 274
+  },
+  {
+    "video": "IMG_0861_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9782,
+    "siamese_distance_min": 0.9629,
+    "siamese_similarity": 37.6,
+    "num_frames": 281
+  },
+  {
+    "video": "IMG_0862_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9769,
+    "siamese_distance_min": 0.9616,
+    "siamese_similarity": 37.6,
+    "num_frames": 262
+  },
+  {
+    "video": "IMG_0863_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9765,
+    "siamese_distance_min": 0.9613,
+    "siamese_similarity": 37.7,
+    "num_frames": 327
+  },
+  {
+    "video": "IMG_0871_preprocessed",
+    "folder": "backhand_tennis_without_ball",
+    "siamese_distance_avg": 0.9809,
+    "siamese_distance_min": 0.9656,
+    "siamese_similarity": 37.5,
+    "num_frames": 332
+  }
+]

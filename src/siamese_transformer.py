@@ -1,34 +1,15 @@
 """
 Siamese Transformer Network for Tennis Stroke Comparison
 ========================================================
-Novel contribution: combines Siamese architecture (pairwise similarity
-learning) with Transformer encoder branches (self-attention for temporal
-sequences). This combination has not been previously applied to tennis
-stroke quality assessment.
-
-Architecture:
-  Input A (player stroke) ──► Transformer Encoder ──► Embedding A ──┐
-                                                                     ├─► Distance ──► Similarity Score
-  Input B (expert stroke) ──► Transformer Encoder ──► Embedding B ──┘
-                               (shared weights)
-
-Training:
-  - Positive pairs: expert-expert (should produce low distance)
-  - Negative pairs: expert-beginner (should produce high distance)
-  - Loss: Contrastive loss
-
-Inference:
-  - Compare player stroke against expert reference
-  - Produces learned similarity score
-  - Attention weights show which frames matter most
-
-Optimised for Apple M4 with MPS GPU acceleration.
+Custom encoder layer guarantees attention weight extraction
+on PyTorch 2.8+ where the default fast path skips hooks.
 """
 
 import numpy as np
 import json
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
@@ -37,9 +18,6 @@ import math
 import warnings
 warnings.filterwarnings('ignore')
 
-# ================================================================
-# DEVICE SELECTION — Apple M4 GPU acceleration
-# ================================================================
 if torch.backends.mps.is_available():
     DEVICE = torch.device("mps")
     print("Using Apple M4 GPU (MPS)")
@@ -50,23 +28,17 @@ else:
     DEVICE = torch.device("cpu")
     print("Using CPU")
 
-# Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
 PREPROCESSED_DIR = PROJECT_ROOT / "data" / "preprocessed"
 RESULTS_DIR = PROJECT_ROOT / "results"
 MODEL_DIR = PROJECT_ROOT / "models"
 
-# Joint names
 JOINT_NAMES = [
-    "left_shoulder", "right_shoulder",
-    "left_elbow", "right_elbow",
-    "left_wrist", "right_wrist",
-    "left_hip", "right_hip",
-    "left_knee", "right_knee",
-    "left_ankle", "right_ankle",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle",
 ]
 
-# Model hyperparameters — upgraded for M4
 MAX_SEQ_LENGTH = 200
 INPUT_DIM = 24
 EMBED_DIM = 128
@@ -96,56 +68,79 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:, :x.size(1), :]
 
 
-class StrokeTransformerEncoder(nn.Module):
-    def __init__(self, input_dim=INPUT_DIM, embed_dim=EMBED_DIM,
-                 num_heads=NUM_HEADS, num_layers=NUM_LAYERS,
-                 dropout=DROPOUT, embedding_size=EMBEDDING_SIZE):
+class CustomEncoderLayer(nn.Module):
+    """
+    Custom Transformer encoder layer that explicitly stores attention weights.
+    Bypasses PyTorch's fast path which skips attention weight computation.
+    """
+    def __init__(self, d_model, nhead, dim_feedforward, dropout):
         super().__init__()
-        self.input_projection = nn.Linear(input_dim, embed_dim)
-        self.pos_encoder = PositionalEncoding(embed_dim, max_len=MAX_SEQ_LENGTH + 10)
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.last_attn_weights = None
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim, nhead=num_heads,
-            dim_feedforward=embed_dim * 4, dropout=dropout, batch_first=True,
+    def forward(self, src, src_key_padding_mask=None):
+        # Self-attention with need_weights=True to guarantee weight extraction
+        attn_output, attn_weights = self.self_attn(
+            src, src, src,
+            key_padding_mask=src_key_padding_mask,
+            need_weights=True,
+            average_attn_weights=True,
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.last_attn_weights = attn_weights.detach().cpu()
+
+        # Residual + norm
+        src = src + self.dropout1(attn_output)
+        src = self.norm1(src)
+
+        # Feedforward
+        ff_output = self.linear2(self.dropout(F.relu(self.linear1(src))))
+        src = src + self.dropout2(ff_output)
+        src = self.norm2(src)
+
+        return src
+
+
+class StrokeTransformerEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.input_projection = nn.Linear(INPUT_DIM, EMBED_DIM)
+        self.pos_encoder = PositionalEncoding(EMBED_DIM, max_len=MAX_SEQ_LENGTH + 10)
+
+        self.layers = nn.ModuleList([
+            CustomEncoderLayer(EMBED_DIM, NUM_HEADS, EMBED_DIM * 4, DROPOUT)
+            for _ in range(NUM_LAYERS)
+        ])
 
         self.output_projection = nn.Sequential(
-            nn.Linear(embed_dim, embedding_size), nn.ReLU(),
-            nn.Dropout(dropout), nn.Linear(embedding_size, embedding_size),
+            nn.Linear(EMBED_DIM, EMBEDDING_SIZE), nn.ReLU(),
+            nn.Dropout(DROPOUT), nn.Linear(EMBEDDING_SIZE, EMBEDDING_SIZE),
         )
-        self.attention_weights = None
-        self._register_hooks()
-
-    def _register_hooks(self):
-        self._hooks = []
-        for layer in self.transformer_encoder.layers:
-            layer.self_attn.need_weights = True
-            layer.self_attn.average_attn_weights = True
-            hook = layer.self_attn.register_forward_hook(self._attention_hook)
-            self._hooks.append(hook)
-
-    def _attention_hook(self, module, input, output):
-        if isinstance(output, tuple) and len(output) > 1 and output[1] is not None:
-            self.attention_weights = output[1].detach().cpu()
 
     def forward(self, x, mask=None):
         x = self.input_projection(x)
         x = self.pos_encoder(x)
-        if mask is not None:
-            x = self.transformer_encoder(x, src_key_padding_mask=mask)
-        else:
-            x = self.transformer_encoder(x)
+
+        for layer in self.layers:
+            x = layer(x, src_key_padding_mask=mask)
 
         if mask is not None:
-            mask_expanded = (~mask).unsqueeze(-1).float()
-            x = x * mask_expanded
-            lengths = mask_expanded.sum(dim=1)
-            x = x.sum(dim=1) / lengths.clamp(min=1)
+            m = (~mask).unsqueeze(-1).float()
+            x = (x * m).sum(dim=1) / m.sum(dim=1).clamp(min=1)
         else:
             x = x.mean(dim=1)
 
         return self.output_projection(x)
+
+    def get_attention_weights(self):
+        """Get attention weights from the last encoder layer."""
+        return self.layers[-1].last_attn_weights
 
 
 class SiameseTransformer(nn.Module):
@@ -154,10 +149,8 @@ class SiameseTransformer(nn.Module):
         self.encoder = StrokeTransformerEncoder()
 
     def forward(self, x1, x2, mask1=None, mask2=None):
-        e1 = self.encoder(x1, mask1)
-        e2 = self.encoder(x2, mask2)
-        distance = torch.sqrt(torch.sum((e1 - e2) ** 2, dim=1) + 1e-8)
-        return distance, e1, e2
+        e1, e2 = self.encoder(x1, mask1), self.encoder(x2, mask2)
+        return torch.sqrt(torch.sum((e1 - e2) ** 2, dim=1) + 1e-8), e1, e2
 
     def get_embedding(self, x, mask=None):
         return self.encoder(x, mask)
@@ -183,54 +176,42 @@ class StrokePairDataset(Dataset):
 
     def _generate_pairs(self):
         self.pairs = []
-        n_expert = len(self.expert_sequences)
-        n_beginner = len(self.beginner_sequences)
+        n_e, n_b = len(self.expert_sequences), len(self.beginner_sequences)
         half = self.pairs_per_epoch // 2
-
         for _ in range(half):
             if np.random.random() > 0.5:
-                i, j = np.random.choice(n_expert, 2, replace=False)
+                i, j = np.random.choice(n_e, 2, replace=False)
                 self.pairs.append((self.expert_sequences[i], self.expert_sequences[j], 1.0))
             else:
-                i, j = np.random.choice(n_beginner, 2, replace=False)
+                i, j = np.random.choice(n_b, 2, replace=False)
                 self.pairs.append((self.beginner_sequences[i], self.beginner_sequences[j], 1.0))
-
         for _ in range(half):
-            i = np.random.randint(n_expert)
-            j = np.random.randint(n_beginner)
-            self.pairs.append((self.expert_sequences[i], self.beginner_sequences[j], 0.0))
+            self.pairs.append((self.expert_sequences[np.random.randint(n_e)],
+                             self.beginner_sequences[np.random.randint(n_b)], 0.0))
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         seq_a, seq_b, label = self.pairs[idx]
-        seq_a_padded, mask_a = self._pad_sequence(seq_a)
-        seq_b_padded, mask_b = self._pad_sequence(seq_b)
-        return (
-            torch.FloatTensor(seq_a_padded),
-            torch.FloatTensor(seq_b_padded),
-            torch.BoolTensor(mask_a),
-            torch.BoolTensor(mask_b),
-            torch.FloatTensor([label]),
-        )
+        a_pad, a_mask = self._pad(seq_a)
+        b_pad, b_mask = self._pad(seq_b)
+        return (torch.FloatTensor(a_pad), torch.FloatTensor(b_pad),
+                torch.BoolTensor(a_mask), torch.BoolTensor(b_mask), torch.FloatTensor([label]))
 
-    def _pad_sequence(self, seq):
+    def _pad(self, seq):
         flat = seq.reshape(len(seq), -1)
-        seq_len = len(flat)
-        if seq_len >= MAX_SEQ_LENGTH:
+        sl = len(flat)
+        if sl >= MAX_SEQ_LENGTH:
             return flat[:MAX_SEQ_LENGTH], [False] * MAX_SEQ_LENGTH
-        padding = np.zeros((MAX_SEQ_LENGTH - seq_len, flat.shape[1]))
-        padded = np.vstack([flat, padding])
-        mask = [False] * seq_len + [True] * (MAX_SEQ_LENGTH - seq_len)
-        return padded, mask
+        pad = np.zeros((MAX_SEQ_LENGTH - sl, flat.shape[1]))
+        return np.vstack([flat, pad]), [False] * sl + [True] * (MAX_SEQ_LENGTH - sl)
 
 
 def load_sequences(folder_path):
     sequences, names = [], []
     folder = Path(folder_path)
-    if not folder.exists():
-        return sequences, names
+    if not folder.exists(): return sequences, names
     for f in sorted(folder.iterdir()):
         if f.name.endswith("_preprocessed.npy"):
             sequences.append(np.load(str(f)))
@@ -240,30 +221,29 @@ def load_sequences(folder_path):
 
 def pad_single_sequence(seq):
     flat = seq.reshape(len(seq), -1)
-    seq_len = len(flat)
-    if seq_len >= MAX_SEQ_LENGTH:
-        padded = flat[:MAX_SEQ_LENGTH]
-        mask = [False] * MAX_SEQ_LENGTH
+    sl = len(flat)
+    if sl >= MAX_SEQ_LENGTH:
+        padded, mask = flat[:MAX_SEQ_LENGTH], [False] * MAX_SEQ_LENGTH
     else:
-        padding = np.zeros((MAX_SEQ_LENGTH - seq_len, flat.shape[1]))
-        padded = np.vstack([flat, padding])
-        mask = [False] * seq_len + [True] * (MAX_SEQ_LENGTH - seq_len)
-    return (
-        torch.FloatTensor(padded).unsqueeze(0).to(DEVICE),
-        torch.BoolTensor(mask).unsqueeze(0).to(DEVICE),
-    )
+        pad = np.zeros((MAX_SEQ_LENGTH - sl, flat.shape[1]))
+        padded, mask = np.vstack([flat, pad]), [False] * sl + [True] * (MAX_SEQ_LENGTH - sl)
+    return (torch.FloatTensor(padded).unsqueeze(0).to(DEVICE),
+            torch.BoolTensor(mask).unsqueeze(0).to(DEVICE))
 
 
 def extract_attention_weights(model, sequence):
+    """Extract attention weights using the custom layer's stored weights."""
     model.eval()
     padded, mask = pad_single_sequence(sequence)
     with torch.no_grad():
         _ = model.get_embedding(padded, mask)
-    attn = model.encoder.attention_weights
+
+    attn = model.encoder.get_attention_weights()
     if attn is not None:
-        attn_avg = attn[0].mean(dim=0).numpy()
+        # attn shape: (batch, seq_len, seq_len)
+        attn_np = attn[0].numpy()
         seq_len = int((~mask[0].cpu()).sum())
-        frame_importance = attn_avg[:seq_len, :seq_len].sum(axis=0)
+        frame_importance = attn_np[:seq_len, :seq_len].sum(axis=0)
         frame_importance = frame_importance / frame_importance.max()
         return frame_importance
     return None
@@ -274,49 +254,41 @@ def train_model(expert_seqs, beginner_seqs):
     print("TRAINING SIAMESE TRANSFORMER")
     print(f"{'=' * 50}")
     print(f"  Device: {DEVICE}")
-    print(f"  Expert sequences: {len(expert_seqs)}")
-    print(f"  Beginner sequences: {len(beginner_seqs)}")
     print(f"  Architecture: {NUM_LAYERS} layers, {NUM_HEADS} heads, {EMBED_DIM} dim")
-    print(f"  Embedding size: {EMBEDDING_SIZE}")
-    print(f"  Epochs: {NUM_EPOCHS}, Batch size: {BATCH_SIZE}")
-    print(f"  Pairs per epoch: {PAIRS_PER_EPOCH}")
+    print(f"  Epochs: {NUM_EPOCHS}, Pairs/epoch: {PAIRS_PER_EPOCH}")
 
     expert_train, expert_val = train_test_split(expert_seqs, test_size=0.2, random_state=42)
     beginner_train, beginner_val = train_test_split(beginner_seqs, test_size=0.2, random_state=42)
+    print(f"  Train: {len(expert_train)} expert, {len(beginner_train)} beginner")
+    print(f"  Val: {len(expert_val)} expert, {len(beginner_val)} beginner")
 
-    print(f"\n  Training: {len(expert_train)} expert, {len(beginner_train)} beginner")
-    print(f"  Validation: {len(expert_val)} expert, {len(beginner_val)} beginner")
-
-    train_dataset = StrokePairDataset(expert_train, beginner_train, pairs_per_epoch=PAIRS_PER_EPOCH)
-    val_dataset = StrokePairDataset(expert_val, beginner_val, pairs_per_epoch=400)
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    train_ds = StrokePairDataset(expert_train, beginner_train, pairs_per_epoch=PAIRS_PER_EPOCH)
+    val_ds = StrokePairDataset(expert_val, beginner_val, pairs_per_epoch=400)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
     model = SiameseTransformer().to(DEVICE)
     criterion = ContrastiveLoss(margin=MARGIN).to(DEVICE)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
 
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"\n  Total parameters: {total_params:,}")
-
+    print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"\n  {'Epoch':<8} {'Train Loss':<14} {'Val Loss':<14} {'Val Acc':<10}")
     print(f"  {'-' * 44}")
 
     best_val_loss = float('inf')
-    training_history = []
+    history = []
 
     for epoch in range(NUM_EPOCHS):
         model.train()
         train_losses = []
-        for seq_a, seq_b, mask_a, mask_b, label in train_loader:
-            seq_a, seq_b = seq_a.to(DEVICE), seq_b.to(DEVICE)
-            mask_a, mask_b = mask_a.to(DEVICE), mask_b.to(DEVICE)
+        for sa, sb, ma, mb, label in train_loader:
+            sa, sb = sa.to(DEVICE), sb.to(DEVICE)
+            ma, mb = ma.to(DEVICE), mb.to(DEVICE)
             label = label.to(DEVICE)
-
             optimizer.zero_grad()
-            distance, _, _ = model(seq_a, seq_b, mask_a, mask_b)
-            loss = criterion(distance, label.squeeze())
+            dist, _, _ = model(sa, sb, ma, mb)
+            loss = criterion(dist, label.squeeze())
             loss.backward()
             optimizer.step()
             train_losses.append(loss.item())
@@ -324,118 +296,83 @@ def train_model(expert_seqs, beginner_seqs):
         model.eval()
         val_losses, val_correct, val_total = [], 0, 0
         with torch.no_grad():
-            for seq_a, seq_b, mask_a, mask_b, label in val_loader:
-                seq_a, seq_b = seq_a.to(DEVICE), seq_b.to(DEVICE)
-                mask_a, mask_b = mask_a.to(DEVICE), mask_b.to(DEVICE)
+            for sa, sb, ma, mb, label in val_loader:
+                sa, sb = sa.to(DEVICE), sb.to(DEVICE)
+                ma, mb = ma.to(DEVICE), mb.to(DEVICE)
                 label = label.to(DEVICE)
-
-                distance, _, _ = model(seq_a, seq_b, mask_a, mask_b)
-                loss = criterion(distance, label.squeeze())
+                dist, _, _ = model(sa, sb, ma, mb)
+                loss = criterion(dist, label.squeeze())
                 val_losses.append(loss.item())
-                predicted_similar = (distance < MARGIN / 2).float()
-                val_correct += (predicted_similar == label.squeeze()).sum().item()
+                val_correct += ((dist < MARGIN/2).float() == label.squeeze()).sum().item()
                 val_total += len(label)
 
         scheduler.step()
-        avg_train = np.mean(train_losses)
-        avg_val = np.mean(val_losses)
-        val_acc = val_correct / val_total if val_total > 0 else 0
+        at, av = np.mean(train_losses), np.mean(val_losses)
+        va = val_correct / val_total if val_total > 0 else 0
+        history.append({"epoch": epoch+1, "train_loss": round(float(at), 4),
+                       "val_loss": round(float(av), 4), "val_accuracy": round(float(va), 4)})
 
-        training_history.append({
-            "epoch": epoch + 1,
-            "train_loss": round(float(avg_train), 4),
-            "val_loss": round(float(avg_val), 4),
-            "val_accuracy": round(float(val_acc), 4),
-        })
+        if (epoch+1) % 10 == 0 or epoch == 0:
+            print(f"  {epoch+1:<8} {at:<14.4f} {av:<14.4f} {va:<10.3f}")
 
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            print(f"  {epoch+1:<8} {avg_train:<14.4f} {avg_val:<14.4f} {val_acc:<10.3f}")
-
-        if avg_val < best_val_loss:
-            best_val_loss = avg_val
+        if av < best_val_loss:
+            best_val_loss = av
             MODEL_DIR.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), str(MODEL_DIR / "siamese_transformer_best.pth"))
 
-        train_dataset._generate_pairs()
-        val_dataset._generate_pairs()
+        train_ds._generate_pairs()
+        val_ds._generate_pairs()
 
     print(f"\n  Best validation loss: {best_val_loss:.4f}")
-    model.load_state_dict(
-        torch.load(str(MODEL_DIR / "siamese_transformer_best.pth"), map_location=DEVICE, weights_only=True)
-    )
-    return model, training_history
+    model.load_state_dict(torch.load(str(MODEL_DIR / "siamese_transformer_best.pth"), map_location=DEVICE, weights_only=True))
+
+    # Verify attention
+    test_attn = extract_attention_weights(model, expert_seqs[0])
+    if test_attn is not None:
+        print(f"  Attention extraction: WORKING ({len(test_attn)} frames)")
+    else:
+        print(f"  Attention extraction: NOT WORKING")
+
+    return model, history
 
 
-def evaluate_personal_recordings(model, expert_seqs, expert_names, personal_seqs, personal_names, personal_sources):
+def evaluate_personal(model, expert_seqs, personal_seqs, personal_names, personal_sources):
     print(f"\n{'=' * 50}")
-    print("SIAMESE TRANSFORMER: PERSONAL STROKE EVALUATION")
+    print("PERSONAL STROKE EVALUATION")
     print(f"{'=' * 50}")
-
     model.eval()
     results = []
-    num_refs = min(10, len(expert_seqs))
-    ref_indices = np.random.choice(len(expert_seqs), num_refs, replace=False)
+    ref_idx = np.random.choice(len(expert_seqs), min(10, len(expert_seqs)), replace=False)
 
-    for i, (personal_seq, name, source) in enumerate(zip(personal_seqs, personal_names, personal_sources)):
+    for i, (seq, name, source) in enumerate(zip(personal_seqs, personal_names, personal_sources)):
         distances = []
-        for ref_idx in ref_indices:
-            p_padded, p_mask = pad_single_sequence(personal_seq)
-            e_padded, e_mask = pad_single_sequence(expert_seqs[ref_idx])
+        for ri in ref_idx:
+            p, pm = pad_single_sequence(seq)
+            e, em = pad_single_sequence(expert_seqs[ri])
             with torch.no_grad():
-                dist, _, _ = model(p_padded, e_padded, p_mask, e_mask)
-                distances.append(dist.item())
+                d, _, _ = model(p, e, pm, em)
+                distances.append(d.item())
 
-        avg_distance = np.mean(distances)
-        min_distance = np.min(distances)
-        similarity = round(100 * np.exp(-avg_distance), 1)
-        attention = extract_attention_weights(model, personal_seq)
+        avg_d = np.mean(distances)
+        sim = round(100 * np.exp(-avg_d), 1)
+        attn = extract_attention_weights(model, seq)
 
-        result = {
-            "video": name, "folder": source,
-            "siamese_distance_avg": round(float(avg_distance), 4),
-            "siamese_distance_min": round(float(min_distance), 4),
-            "siamese_similarity": similarity,
-            "num_frames": len(personal_seq),
-        }
-        if attention is not None:
-            top_frames = np.argsort(attention)[-5:][::-1]
-            result["top_attention_frames"] = top_frames.tolist()
-            result["attention_weights"] = attention.tolist()
+        result = {"video": name, "folder": source,
+                  "siamese_distance_avg": round(float(avg_d), 4),
+                  "siamese_distance_min": round(float(np.min(distances)), 4),
+                  "siamese_similarity": sim, "num_frames": len(seq)}
+
+        if attn is not None:
+            top = np.argsort(attn)[-5:][::-1]
+            result["top_attention_frames"] = top.tolist()
+            result["attention_weights"] = attn.tolist()
 
         results.append(result)
-        if (i + 1) % 10 == 0 or i == 0:
-            print(f"  [{i+1}/{len(personal_seqs)}] {name}")
-            print(f"    Distance: {avg_distance:.4f}  |  Similarity: {similarity}%")
+        if (i+1) % 10 == 0 or i == 0:
+            status = "with attention" if attn is not None else "NO attention"
+            print(f"  [{i+1}/{len(personal_seqs)}] {name} — Sim: {sim}% ({status})")
 
     return results
-
-
-def compare_with_dtw_results(siamese_results):
-    dtw_path = RESULTS_DIR / "dtw_comparison_results.json"
-    if not dtw_path.exists():
-        print("\n  DTW results not found, skipping comparison")
-        return
-
-    with open(str(dtw_path)) as f:
-        dtw_results = json.load(f)
-
-    print(f"\n{'=' * 50}")
-    print("COMPARISON: SIAMESE TRANSFORMER vs DTW")
-    print(f"{'=' * 50}")
-
-    dtw_lookup = {r["video"]: r for r in dtw_results}
-    folders = set(r["folder"] for r in siamese_results)
-
-    print(f"\n  {'Folder':<38} {'DTW Sim':>10} {'Siamese Sim':>12}")
-    print(f"  {'-' * 62}")
-
-    for folder in sorted(folders):
-        siamese_folder = [r for r in siamese_results if r["folder"] == folder]
-        dtw_sims = [v["similarity_score"] for v in dtw_lookup.values() if v["folder"] == folder]
-        siamese_sims = [r["siamese_similarity"] for r in siamese_folder]
-
-        if dtw_sims and siamese_sims:
-            print(f"  {folder:<38} {np.mean(dtw_sims):>9.1f}% {np.mean(siamese_sims):>11.1f}%")
 
 
 def main():
@@ -445,78 +382,53 @@ def main():
     print("=" * 60)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    np.random.seed(42)
-    torch.manual_seed(42)
+    np.random.seed(42); torch.manual_seed(42)
 
-    print("\nLoading preprocessed data...")
+    print("\nLoading data...")
     expert_seqs, expert_names = [], []
-    for stroke in ["forehand", "backhand"]:
-        seqs, names = load_sequences(PREPROCESSED_DIR / "thetis" / stroke)
-        expert_seqs.extend(seqs)
-        expert_names.extend(names)
+    for s in ["forehand", "backhand"]:
+        sq, nm = load_sequences(PREPROCESSED_DIR / "thetis" / s)
+        expert_seqs.extend(sq); expert_names.extend(nm)
 
-    beginner_seqs, beginner_names = [], []
-    for stroke in ["forehand", "backhand"]:
-        seqs, names = load_sequences(PREPROCESSED_DIR / "thetis_beginners" / stroke)
-        beginner_seqs.extend(seqs)
-        beginner_names.extend(names)
+    beginner_seqs = []
+    for s in ["forehand", "backhand"]:
+        sq, _ = load_sequences(PREPROCESSED_DIR / "thetis_beginners" / s)
+        beginner_seqs.extend(sq)
 
     personal_seqs, personal_names, personal_sources = [], [], []
-    for folder_name in ["forehand_tennis_with_ball", "forehand_tennis_without_ball",
-                         "backhand_tennis_with_ball", "backhand_tennis_without_ball"]:
-        seqs, names = load_sequences(PREPROCESSED_DIR / folder_name)
-        personal_seqs.extend(seqs)
-        personal_names.extend(names)
-        personal_sources.extend([folder_name] * len(seqs))
+    for fn in ["forehand_tennis_with_ball", "forehand_tennis_without_ball",
+               "backhand_tennis_with_ball", "backhand_tennis_without_ball"]:
+        sq, nm = load_sequences(PREPROCESSED_DIR / fn)
+        personal_seqs.extend(sq); personal_names.extend(nm)
+        personal_sources.extend([fn] * len(sq))
 
     print(f"  Expert: {len(expert_seqs)}, Beginner: {len(beginner_seqs)}, Personal: {len(personal_seqs)}")
-
     if not expert_seqs or not beginner_seqs:
-        print("\nERROR: Need both expert and beginner data.")
-        return
+        print("ERROR: Need both expert and beginner data."); return
 
     model, history = train_model(expert_seqs, beginner_seqs)
+    results = evaluate_personal(model, expert_seqs, personal_seqs, personal_names, personal_sources)
 
-    siamese_results = evaluate_personal_recordings(
-        model, expert_seqs, expert_names, personal_seqs, personal_names, personal_sources,
-    )
-
-    print(f"\n{'=' * 50}")
-    print("RESULTS SUMMARY")
-    print(f"{'=' * 50}")
-    folders = set(r["folder"] for r in siamese_results)
-    print(f"\n  {'Folder':<38} {'Count':>6} {'Avg Sim':>10}")
-    print(f"  {'-' * 56}")
-    for folder in sorted(folders):
-        fr = [r for r in siamese_results if r["folder"] == folder]
-        print(f"  {folder:<38} {len(fr):>6} {np.mean([r['siamese_similarity'] for r in fr]):>9.1f}%")
-
-    for stroke in ["forehand", "backhand"]:
-        sr = [r for r in siamese_results if stroke in r["folder"]]
-        if sr:
-            print(f"  {stroke:<38} {np.mean([r['siamese_similarity'] for r in sr]):>9.1f}%")
-
-    compare_with_dtw_results(siamese_results)
+    # Summary
+    print(f"\n{'=' * 50}\nRESULTS SUMMARY\n{'=' * 50}")
+    for folder in sorted(set(r["folder"] for r in results)):
+        fr = [r for r in results if r["folder"] == folder]
+        ac = sum(1 for r in fr if "attention_weights" in r)
+        print(f"  {folder}: {np.mean([r['siamese_similarity'] for r in fr]):.1f}% avg, {ac}/{len(fr)} with attention")
 
     with open(str(RESULTS_DIR / "siamese_transformer_results.json"), "w") as f:
-        json.dump(siamese_results, f, indent=2)
+        json.dump(results, f, indent=2)
     with open(str(RESULTS_DIR / "siamese_training_history.json"), "w") as f:
         json.dump(history, f, indent=2)
     with open(str(RESULTS_DIR / "siamese_model_info.json"), "w") as f:
-        json.dump({
-            "architecture": "Siamese Transformer", "device": str(DEVICE),
-            "embed_dim": EMBED_DIM, "num_heads": NUM_HEADS, "num_layers": NUM_LAYERS,
-            "embedding_size": EMBEDDING_SIZE, "max_seq_length": MAX_SEQ_LENGTH,
-            "input_dim": INPUT_DIM, "margin": MARGIN, "lr": LEARNING_RATE,
-            "batch_size": BATCH_SIZE, "epochs": NUM_EPOCHS,
-            "pairs_per_epoch": PAIRS_PER_EPOCH,
-            "total_parameters": sum(p.numel() for p in model.parameters()),
-        }, f, indent=2)
+        json.dump({"architecture": "Siamese Transformer", "device": str(DEVICE),
+                   "embed_dim": EMBED_DIM, "num_heads": NUM_HEADS, "num_layers": NUM_LAYERS,
+                   "embedding_size": EMBEDDING_SIZE, "max_seq_length": MAX_SEQ_LENGTH,
+                   "input_dim": INPUT_DIM, "margin": MARGIN, "lr": LEARNING_RATE,
+                   "batch_size": BATCH_SIZE, "epochs": NUM_EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+                   "total_parameters": sum(p.numel() for p in model.parameters())}, f, indent=2)
 
-    print(f"\n{'=' * 60}")
-    print("SIAMESE TRANSFORMER COMPLETE")
-    print(f"{'=' * 60}")
-
+    print(f"\n{'=' * 60}\nCOMPLETE\n{'=' * 60}")
 
 if __name__ == "__main__":
     main()

@@ -17,3 +17,6 @@ __pycache__/
 
 # Results (optional - include if you want)
 # results/
+
+# Claude Code
+.claude/

@@ -7,98 +7,62 @@ through MediaPipe Pose and saves keypoint data.
 import cv2
 import mediapipe as mp
 import numpy as np
-import os
 import json
 from pathlib import Path
 
-# MediaPipe setup
 mp_pose = mp.solutions.pose
 
-# Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
 THETIS_RGB_DIR = PROJECT_ROOT / "data" / "thetis" / "dataset-main" / "VIDEO_RGB"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "thetis"
 
-# THETIS stroke folders to process
 STROKE_FOLDERS = {
-    "forehand_flat": "forehand",   # Maps THETIS folder name to our label
+    "forehand_flat": "forehand",
     "backhand": "backhand",
 }
 
-# Expert players are p32 to p55
-EXPERT_RANGE = range(32, 56)
+EXPERT_RANGE = range(32, 56)  # p32-p55
 
 
 def is_expert(filename):
-    """Check if a video filename belongs to an expert player (p32-p55)."""
-    # Extract player number from filename like p32_foreflat_s1.avi
-    name = Path(filename).stem
-    player_part = name.split("_")[0]  # e.g., "p32"
     try:
-        player_num = int(player_part[1:])  # e.g., 32
-        return player_num in EXPERT_RANGE
+        return int(Path(filename).stem.split("_")[0][1:]) in EXPERT_RANGE
     except (ValueError, IndexError):
         return False
 
 
 def extract_keypoints_from_video(video_path, min_detection_confidence=0.5, min_tracking_confidence=0.5):
-    """
-    Extract pose keypoints from a video using MediaPipe Pose.
-    
-    Returns:
-        keypoints_array: numpy array of shape (num_frames, 33, 2)
-        fps: frames per second of the video
-        total_frames: total number of frames
-        detected_frames: number of frames where pose was detected
-    """
     cap = cv2.VideoCapture(str(video_path))
-    
     if not cap.isOpened():
         print(f"  ERROR: Could not open {video_path}")
         return None, None, 0, 0
-    
+
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
     all_keypoints = []
     detected_frames = 0
-    
-    with mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=2,
-        min_detection_confidence=min_detection_confidence,
-        min_tracking_confidence=min_tracking_confidence,
-    ) as pose:
-        
+
+    with mp_pose.Pose(static_image_mode=False, model_complexity=2,
+                      min_detection_confidence=min_detection_confidence,
+                      min_tracking_confidence=min_tracking_confidence) as pose:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = pose.process(rgb_frame)
-            
+            results = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             if results.pose_landmarks:
-                frame_keypoints = []
-                for landmark in results.pose_landmarks.landmark:
-                    frame_keypoints.append([landmark.x, landmark.y])
-                all_keypoints.append(frame_keypoints)
+                all_keypoints.append([[lm.x, lm.y] for lm in results.pose_landmarks.landmark])
                 detected_frames += 1
             else:
                 all_keypoints.append([[0.0, 0.0]] * 33)
-    
+
     cap.release()
-    
-    if len(all_keypoints) == 0:
+    if not all_keypoints:
         return None, fps, total_frames, 0
-    
-    keypoints_array = np.array(all_keypoints)
-    return keypoints_array, fps, total_frames, detected_frames
+    return np.array(all_keypoints), fps, total_frames, detected_frames
 
 
 def process_thetis_experts():
-    """Process all expert-level THETIS videos and save keypoints."""
-    
     print("=" * 60)
     print("THETIS EXPERT KEYPOINT EXTRACTION")
     print("=" * 60)
@@ -143,13 +107,10 @@ def process_thetis_experts():
             
             if keypoints is not None and detected_frames > 0:
                 detection_rate = (detected_frames / total_frames) * 100 if total_frames > 0 else 0
-                
-                # Save keypoints
+
                 output_name = video_file.stem + "_keypoints.npy"
-                output_path = output_dir / output_name
-                np.save(str(output_path), keypoints)
-                
-                # Save metadata
+                np.save(str(output_dir / output_name), keypoints)
+
                 metadata = {
                     "source_video": video_file.name,
                     "thetis_folder": thetis_folder,
@@ -186,22 +147,18 @@ def process_thetis_experts():
     print(f"Beginner videos skipped: {skipped_beginners}")
     
     if summary:
-        avg_detection = np.mean([s["detection_rate"] for s in summary])
-        print(f"Average detection rate: {avg_detection:.1f}%")
-        
-        # Per-stroke breakdown
+        print(f"Average detection rate: {np.mean([s['detection_rate'] for s in summary]):.1f}%")
+
         print("\nPer-stroke breakdown:")
-        for thetis_folder, our_label in STROKE_FOLDERS.items():
-            stroke_results = [s for s in summary if s["stroke_type"] == our_label]
-            if stroke_results:
-                avg_rate = np.mean([s["detection_rate"] for s in stroke_results])
-                print(f"  {our_label}: {len(stroke_results)} expert videos, avg detection {avg_rate:.1f}%")
-        
-        # Save summary
+        for _, label in STROKE_FOLDERS.items():
+            sr = [s for s in summary if s["stroke_type"] == label]
+            if sr:
+                print(f"  {label}: {len(sr)} videos, avg detection {np.mean([s['detection_rate'] for s in sr]):.1f}%")
+
         summary_path = PROCESSED_DIR / "thetis_extraction_summary.json"
         with open(str(summary_path), "w") as f:
             json.dump(summary, f, indent=2)
-        print(f"\nFull summary saved to: {summary_path}")
+        print(f"Summary saved to: {summary_path}")
 
 
 if __name__ == "__main__":

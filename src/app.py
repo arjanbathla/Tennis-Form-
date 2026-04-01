@@ -114,9 +114,7 @@ JOINT_FEEDBACK = {
 }
 
 
-# ================================================================
-# MODEL (must match siamese_transformer.py exactly)
-# ================================================================
+# must match siamese_transformer.py exactly
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=500):
         super().__init__()
@@ -193,9 +191,6 @@ class SiameseTransformer(nn.Module):
         return self.encoder(x, mask)
 
 
-# ================================================================
-# PROCESSING
-# ================================================================
 def process_uploaded_video(video_path):
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened(): return None, None, None
@@ -384,9 +379,6 @@ def get_stroke_type(f): return "Forehand" if "forehand" in f else "Backhand" if 
 def get_ball_type(f): return "Shadow Swing" if "without_ball" in f else "With Ball" if "with_ball" in f else "Unknown"
 
 
-# ================================================================
-# HELPERS
-# ================================================================
 def score_color(score):
     if score >= 40: return "#22C55E"
     elif score >= 25: return "#F59E0B"
@@ -433,9 +425,6 @@ def base_layout(title="", height=400, showlegend=True):
     )
 
 
-# ================================================================
-# PAGE CONFIG
-# ================================================================
 st.set_page_config(page_title="TennisForm", page_icon="🎾", layout="wide")
 
 st.markdown("""
@@ -582,9 +571,6 @@ hr { border-color: #E2E8F0 !important; margin: 1.5rem 0 !important; }
 """, unsafe_allow_html=True)
 
 
-# ================================================================
-# SIDEBAR
-# ================================================================
 with st.sidebar:
     st.markdown("""
     <div style="text-align:center; padding: 1.75rem 1rem 1.25rem; border-bottom: 1px solid #1E293B; margin-bottom: 0.75rem;">
@@ -615,9 +601,6 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# ================================================================
-# OVERVIEW
-# ================================================================
 if page == "Overview":
     st.markdown("""
     <div style="margin-bottom: 1.75rem;">
@@ -655,7 +638,6 @@ if page == "Overview":
 
     st.markdown('<div style="height: 1.5rem;"></div>', unsafe_allow_html=True)
 
-    # Method cards
     st.markdown("""
     <div style="font-size: 1rem; font-weight: 700; color: #1E293B; margin-bottom: 1rem;
          padding-bottom: 0.5rem; border-bottom: 2px solid #1E40AF; display: inline-block;">
@@ -720,9 +702,6 @@ if page == "Overview":
     st.info("Upload your stroke video in **Analyse My Stroke** to get personalised AI-powered coaching feedback.")
 
 
-# ================================================================
-# ANALYSE MY STROKE
-# ================================================================
 elif page == "Analyse My Stroke":
     st.markdown("""
     <div style="margin-bottom: 1.5rem;">
@@ -812,7 +791,6 @@ elif page == "Analyse My Stroke":
                 mlr = ml_predict(mlm, prep) if mlm else None
 
                 if dtw_r:
-                    # ---- Similarity Scores ----
                     st.markdown("""
                     <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
                          padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
@@ -835,7 +813,6 @@ elif page == "Analyse My Stroke":
                             expert_votes = sum(1 for m in mlr.values() if m["prediction"] == "expert")
                             st.metric("ML Consensus", f"{expert_votes}/3 Expert")
 
-                    # Plotly horizontal score bars
                     scores, labels, colors = [ds], ["DTW"], [score_color(ds)]
                     if sr:
                         ss = sr["siamese_similarity"]
@@ -868,7 +845,6 @@ elif page == "Analyse My Stroke":
                     fig.update_layout(**layout)
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # ML Classification table
                     if mlr:
                         st.markdown("""
                         <div style="font-size:13px; font-weight:700; color:#1E293B; margin:0.5rem 0;
@@ -882,7 +858,6 @@ elif page == "Analyse My Stroke":
                         ])
                         st.dataframe(ml_df, use_container_width=True, hide_index=True)
 
-                    # ---- Body Part Breakdown ----
                     st.markdown("---")
                     st.markdown("""
                     <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
@@ -914,7 +889,6 @@ elif page == "Analyse My Stroke":
                     fig2.update_layout(**layout2)
                     st.plotly_chart(fig2, use_container_width=True)
 
-                    # ---- Attention Heatmap ----
                     if attn is not None:
                         st.markdown("---")
                         st.markdown("""
@@ -957,7 +931,6 @@ elif page == "Analyse My Stroke":
                     else:
                         st.info("Attention heatmap unavailable. Retrain the Siamese Transformer with the updated script.")
 
-                    # ---- Coaching Feedback ----
                     st.markdown("---")
                     st.markdown("""
                     <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
@@ -1038,7 +1011,6 @@ elif page == "Analyse My Stroke":
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                    # Top 3 Tips
                     st.markdown("---")
                     st.markdown("""
                     <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
@@ -1069,9 +1041,6 @@ elif page == "Analyse My Stroke":
             st.error("Could not process the video. Please check the format and ensure a person is clearly visible.")
 
 
-# ================================================================
-# DTW ANALYSIS
-# ================================================================
 elif page == "DTW Analysis":
     st.markdown("""
     <div style="margin-bottom: 1.5rem;">
@@ -1088,7 +1057,6 @@ elif page == "DTW Analysis":
     else:
         df = pd.DataFrame(dd)
 
-        # Summary metrics
         c1, c2, c3, c4 = st.columns(4)
         with c1: st.metric("Total Strokes", len(df))
         with c2: st.metric("Mean Similarity", f"{df['similarity_score'].mean():.1f}%")
@@ -1097,7 +1065,6 @@ elif page == "DTW Analysis":
 
         st.markdown('<div style="height:1rem;"></div>', unsafe_allow_html=True)
 
-        # Box plot by folder
         fds = sorted(df["folder"].unique())
         box_colors = ["#1E40AF", "#3B82F6", "#F59E0B", "#22C55E"]
         box_fill_colors = ["rgba(30,64,175,0.15)", "rgba(59,130,246,0.15)",
@@ -1121,7 +1088,6 @@ elif page == "DTW Analysis":
         fig.update_layout(**layout)
         st.plotly_chart(fig, use_container_width=True)
 
-        # Per-joint distances
         st.markdown("""
         <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:0.75rem 0 1rem;
              padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
@@ -1153,9 +1119,6 @@ elif page == "DTW Analysis":
         st.plotly_chart(fig2, use_container_width=True)
 
 
-# ================================================================
-# ML CLASSIFICATION
-# ================================================================
 elif page == "ML Classification":
     st.markdown("""
     <div style="margin-bottom: 1.5rem;">
@@ -1172,7 +1135,6 @@ elif page == "ML Classification":
     if not md:
         st.error("Results file not found. Run ml_classifiers.py first.")
     else:
-        # Accuracy bar chart
         ms = list(md.keys())
         ac = [md[m]["cv_accuracy_mean"] for m in ms]
         ac_std = [md[m]["cv_accuracy_std"] for m in ms]
@@ -1204,7 +1166,6 @@ elif page == "ML Classification":
         fig.update_layout(**layout)
         st.plotly_chart(fig, use_container_width=True)
 
-        # Confusion matrices
         st.markdown("""
         <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:0.5rem 0 1rem;
              padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
@@ -1229,7 +1190,6 @@ elif page == "ML Classification":
                 st.pyplot(fig_cm)
                 plt.close()
 
-        # Feature importance
         if fi:
             st.markdown("""
             <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:0.5rem 0 1rem;
@@ -1263,9 +1223,6 @@ elif page == "ML Classification":
             st.plotly_chart(fig3, use_container_width=True)
 
 
-# ================================================================
-# SIAMESE TRANSFORMER
-# ================================================================
 elif page == "Siamese Transformer":
     st.markdown("""
     <div style="margin-bottom: 1.5rem;">
@@ -1283,7 +1240,6 @@ elif page == "Siamese Transformer":
     if not sd:
         st.error("Results file not found. Run siamese_transformer.py first.")
     else:
-        # Model architecture card
         if mi:
             st.markdown("""
             <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:0.75rem;
@@ -1297,7 +1253,6 @@ elif page == "Siamese Transformer":
             with c3: st.metric("Embed Dimension", mi.get("embed_dim", "N/A"))
             with c4: st.metric("Total Parameters", f"{mi.get('total_parameters', 0):,}")
 
-        # Training curves
         if sh:
             st.markdown("""
             <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:1rem 0 0.75rem;
@@ -1341,7 +1296,6 @@ elif page == "Siamese Transformer":
                 fig_acc.update_layout(**layout_acc)
                 st.plotly_chart(fig_acc, use_container_width=True)
 
-        # Attention viewer
         entries = [r for r in sd if "attention_weights" in r]
         if entries:
             st.markdown("""
@@ -1373,9 +1327,6 @@ elif page == "Siamese Transformer":
                 st.plotly_chart(fig_attn, use_container_width=True)
 
 
-# ================================================================
-# METHOD COMPARISON
-# ================================================================
 elif page == "Method Comparison":
     st.markdown("""
     <div style="margin-bottom: 1.5rem;">
@@ -1397,14 +1348,12 @@ elif page == "Method Comparison":
         sv = [np.mean([r["siamese_similarity"] for r in sd if r["folder"] == f]) for f in fds]
         labels = [f.replace("_tennis_", " / ").replace("_", " ").title() for f in fds]
 
-        # Summary metrics
         c1, c2 = st.columns(2)
         with c1: st.metric("Avg DTW Similarity (all)", f"{np.mean(dv):.1f}%")
         with c2: st.metric("Avg Siamese Similarity (all)", f"{np.mean(sv):.1f}%")
 
         st.markdown('<div style="height:0.75rem;"></div>', unsafe_allow_html=True)
 
-        # Grouped bar chart
         fig = go.Figure()
         fig.add_trace(go.Bar(
             name="DTW", x=labels, y=dv,
@@ -1427,7 +1376,6 @@ elif page == "Method Comparison":
         fig.update_layout(**layout)
         st.plotly_chart(fig, use_container_width=True)
 
-        # Scatter correlation
         all_dd = {r["video"]: r["similarity_score"] for r in dd}
         all_sd = {r["video"]: r["siamese_similarity"] for r in sd}
         common = set(all_dd.keys()) & set(all_sd.keys())
@@ -1450,9 +1398,6 @@ elif page == "Method Comparison":
             st.plotly_chart(fig2, use_container_width=True)
 
 
-# ================================================================
-# INDIVIDUAL STROKE
-# ================================================================
 elif page == "Individual Stroke":
     st.markdown("""
     <div style="margin-bottom: 1.5rem;">
@@ -1476,7 +1421,6 @@ elif page == "Individual Stroke":
             if e:
                 se = next((r for r in sd if r["video"] == sel), None) if sd else None
 
-                # Stroke info + scores
                 info_col, score_col = st.columns([1, 2])
                 with info_col:
                     st.markdown(f"""
@@ -1516,7 +1460,6 @@ elif page == "Individual Stroke":
                     jvals = [j[1] for j in sj]
                     jcols = [dist_color(v) for v in jvals]
 
-                    # Joint breakdown
                     st.markdown("""
                     <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:0.75rem;
                          padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
@@ -1542,7 +1485,6 @@ elif page == "Individual Stroke":
                     fig.update_layout(**layout)
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # Feedback
                     st.markdown("""
                     <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:0.75rem;
                          padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">

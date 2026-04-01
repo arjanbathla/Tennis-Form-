@@ -69,10 +69,7 @@ class PositionalEncoding(nn.Module):
 
 
 class CustomEncoderLayer(nn.Module):
-    """
-    Custom Transformer encoder layer that explicitly stores attention weights.
-    Bypasses PyTorch's fast path which skips attention weight computation.
-    """
+    # need_weights=True bypasses PyTorch's fast path which skips attention weight computation
     def __init__(self, d_model, nhead, dim_feedforward, dropout):
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
@@ -86,7 +83,6 @@ class CustomEncoderLayer(nn.Module):
         self.last_attn_weights = None
 
     def forward(self, src, src_key_padding_mask=None):
-        # Self-attention with need_weights=True to guarantee weight extraction
         attn_output, attn_weights = self.self_attn(
             src, src, src,
             key_padding_mask=src_key_padding_mask,
@@ -95,15 +91,11 @@ class CustomEncoderLayer(nn.Module):
         )
         self.last_attn_weights = attn_weights.detach().cpu()
 
-        # Residual + norm
         src = src + self.dropout1(attn_output)
         src = self.norm1(src)
-
-        # Feedforward
         ff_output = self.linear2(self.dropout(F.relu(self.linear1(src))))
         src = src + self.dropout2(ff_output)
         src = self.norm2(src)
-
         return src
 
 
@@ -139,7 +131,6 @@ class StrokeTransformerEncoder(nn.Module):
         return self.output_projection(x)
 
     def get_attention_weights(self):
-        """Get attention weights from the last encoder layer."""
         return self.layers[-1].last_attn_weights
 
 
@@ -232,21 +223,18 @@ def pad_single_sequence(seq):
 
 
 def extract_attention_weights(model, sequence):
-    """Extract attention weights using the custom layer's stored weights."""
     model.eval()
     padded, mask = pad_single_sequence(sequence)
     with torch.no_grad():
         _ = model.get_embedding(padded, mask)
 
     attn = model.encoder.get_attention_weights()
-    if attn is not None:
-        # attn shape: (batch, seq_len, seq_len)
-        attn_np = attn[0].numpy()
-        seq_len = int((~mask[0].cpu()).sum())
-        frame_importance = attn_np[:seq_len, :seq_len].sum(axis=0)
-        frame_importance = frame_importance / frame_importance.max()
-        return frame_importance
-    return None
+    if attn is None:
+        return None
+    attn_np = attn[0].numpy()
+    seq_len = int((~mask[0].cpu()).sum())
+    frame_importance = attn_np[:seq_len, :seq_len].sum(axis=0)
+    return frame_importance / frame_importance.max()
 
 
 def train_model(expert_seqs, beginner_seqs):
@@ -326,7 +314,6 @@ def train_model(expert_seqs, beginner_seqs):
     print(f"\n  Best validation loss: {best_val_loss:.4f}")
     model.load_state_dict(torch.load(str(MODEL_DIR / "siamese_transformer_best.pth"), map_location=DEVICE, weights_only=True))
 
-    # Verify attention
     test_attn = extract_attention_weights(model, expert_seqs[0])
     if test_attn is not None:
         print(f"  Attention extraction: WORKING ({len(test_attn)} frames)")
@@ -409,7 +396,6 @@ def main():
     model, history = train_model(expert_seqs, beginner_seqs)
     results = evaluate_personal(model, expert_seqs, personal_seqs, personal_names, personal_sources)
 
-    # Summary
     print(f"\n{'=' * 50}\nRESULTS SUMMARY\n{'=' * 50}")
     for folder in sorted(set(r["folder"] for r in results)):
         fr = [r for r in results if r["folder"] == folder]

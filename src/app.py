@@ -1,7 +1,6 @@
 """
-TennisForm — Tennis Stroke Analysis Dashboard
-==============================================
-Uses custom encoder layer for guaranteed attention weight extraction.
+TennisForm — Streamlit dashboard for stroke analysis.
+Custom encoder layer for guaranteed attention weight extraction.
 """
 
 import streamlit as st
@@ -1038,7 +1037,7 @@ elif page == "Analyse My Stroke":
             pass
 
         if kp is None:
-            st.error("Could not process the video. Please check the format and ensure a person is clearly visible.")
+            st.error("Could not process the video — check format and make sure a person is visible in frame.")
 
 
 elif page == "DTW Analysis":

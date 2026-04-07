@@ -1,8 +1,7 @@
 """
-Siamese Transformer Network for Tennis Stroke Comparison
-========================================================
-Custom encoder layer guarantees attention weight extraction
-on PyTorch 2.8+ where the default fast path skips hooks.
+Siamese Transformer for stroke comparison.
+Custom encoder layer to guarantee attention weight extraction
+(PyTorch 2.8+ fast path skips hooks otherwise).
 """
 
 import numpy as np

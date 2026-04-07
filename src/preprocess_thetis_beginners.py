@@ -1,7 +1,6 @@
 """
-Preprocess THETIS Beginner Keypoints
-Same preprocessing pipeline as the expert and personal data:
-hip-centering, torso scaling, joint selection, smoothing.
+Preprocess THETIS beginner keypoints — same pipeline as
+expert/personal data (hip-centre, torso-scale, smooth).
 """
 
 import numpy as np
@@ -19,32 +18,23 @@ SMOOTHING_WINDOW = 3
 
 
 def preprocess(keypoints):
-    """Full preprocessing pipeline on raw keypoints."""
-    # Remove failed frames
     frame_sums = np.sum(np.abs(keypoints), axis=(1, 2))
     keypoints = keypoints[frame_sums > 0]
-    
     if len(keypoints) < 5:
         return None
-    
-    # Centre on hips
+
     hip_mid = (keypoints[:, LEFT_HIP, :] + keypoints[:, RIGHT_HIP, :]) / 2.0
     keypoints = keypoints - hip_mid[:, np.newaxis, :]
-    
-    # Scale by torso length
+
     shoulder_mid = (keypoints[:, LEFT_SHOULDER, :] + keypoints[:, RIGHT_SHOULDER, :]) / 2.0
     hip_mid2 = (keypoints[:, LEFT_HIP, :] + keypoints[:, RIGHT_HIP, :]) / 2.0
     torso = np.mean(np.linalg.norm(shoulder_mid - hip_mid2, axis=1))
-    
     if torso < 0.01:
         return None
-    
+
     keypoints = keypoints / torso
-    
-    # Select relevant joints
     keypoints = keypoints[:, SELECTED_JOINTS, :]
-    
-    # Smooth
+
     smoothed = np.copy(keypoints).astype(float)
     half = SMOOTHING_WINDOW // 2
     for i in range(len(keypoints)):

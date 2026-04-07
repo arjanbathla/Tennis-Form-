@@ -1,7 +1,6 @@
 """
-THETIS Dataset Keypoint Extraction
-Processes expert-level (p32-p55) forehand and backhand videos
-through MediaPipe Pose and saves keypoint data.
+Extracts keypoints from THETIS expert players (p32-p55)
+via MediaPipe Pose.
 """
 
 import cv2
@@ -83,13 +82,11 @@ def process_thetis_experts():
             print(f"\nWARNING: Folder not found: {source_dir}")
             continue
         
-        # Get all video files
         video_files = sorted([
             f for f in source_dir.iterdir()
             if f.suffix.lower() in ['.avi', '.mp4', '.mov']
         ])
         
-        # Filter to expert players only
         expert_videos = [f for f in video_files if is_expert(f.name)]
         beginner_videos = len(video_files) - len(expert_videos)
         skipped_beginners += beginner_videos
@@ -137,7 +134,6 @@ def process_thetis_experts():
             else:
                 print(f"    FAILED: No keypoints extracted")
     
-    # Print summary
     print("\n" + "=" * 60)
     print("THETIS EXTRACTION COMPLETE")
     print("=" * 60)

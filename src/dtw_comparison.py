@@ -121,7 +121,6 @@ def print_summary_statistics(all_results):
     print("SUMMARY STATISTICS")
     print(f"{'=' * 60}")
     
-    # Group by folder
     folders = set(r["folder"] for r in all_results)
     
     print(f"\n{'Folder':<40} {'Count':>6} {'Avg DTW':>10} {'Avg Sim':>10}")
@@ -133,7 +132,6 @@ def print_summary_statistics(all_results):
         avg_sim = np.mean([r["similarity_score"] for r in folder_results])
         print(f"  {folder:<38} {len(folder_results):>6} {avg_dtw:>10.4f} {avg_sim:>9.1f}%")
     
-    # Group by stroke type
     print(f"\n{'Stroke Type':<40} {'Count':>6} {'Avg DTW':>10} {'Avg Sim':>10}")
     print("-" * 70)
     
@@ -144,7 +142,6 @@ def print_summary_statistics(all_results):
             avg_sim = np.mean([r["similarity_score"] for r in stroke_results])
             print(f"  {stroke:<38} {len(stroke_results):>6} {avg_dtw:>10.4f} {avg_sim:>9.1f}%")
     
-    # Per-joint analysis across all results
     print(f"\nPER-JOINT AVERAGE DTW DISTANCES (all strokes combined)")
     print("-" * 50)
     
@@ -153,7 +150,6 @@ def print_summary_statistics(all_results):
         distances = [r["per_joint_distances"][joint] for r in all_results]
         joint_averages[joint] = np.mean(distances)
     
-    # Sort by distance (worst first)
     sorted_joints = sorted(joint_averages.items(), key=lambda x: x[1], reverse=True)
     
     for joint_name, avg_dist in sorted_joints:
@@ -210,5 +206,5 @@ def main():
 
 
 if __name__ == "__main__":
-    np.random.seed(42)  # For reproducibility
+    np.random.seed(42)
     main()

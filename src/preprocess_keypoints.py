@@ -75,7 +75,7 @@ def smooth_keypoints(keypoints, window_size=SMOOTHING_WINDOW):
     return smoothed
 
 
-def preprocess_single_video(keypoints_path, metadata_path=None):
+def preprocess_single_video(keypoints_path):
     keypoints = np.load(str(keypoints_path))
     info = {
         "source_file": keypoints_path.name,
@@ -123,13 +123,10 @@ def process_folder(input_dir, output_dir, label):
     successful = 0
     
     for npy_file in npy_files:
-        meta_file = npy_file.parent / npy_file.name.replace("_keypoints.npy", "_metadata.json")
-        
-        preprocessed, info = preprocess_single_video(npy_file, meta_file)
+        preprocessed, info = preprocess_single_video(npy_file)
         info["folder"] = label
         
         if preprocessed is not None:
-            # Save preprocessed keypoints
             output_name = npy_file.stem.replace("_keypoints", "_preprocessed") + ".npy"
             output_path = output_dir / output_name
             np.save(str(output_path), preprocessed)
@@ -193,7 +190,6 @@ def main():
         print(f"Average final frames: {avg_final:.0f}")
         print(f"Average torso length: {avg_torso:.3f}")
     
-    # Save full summary
     summary_path = PREPROCESSED_DIR / "preprocessing_summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     with open(str(summary_path), "w") as f:

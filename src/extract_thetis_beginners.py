@@ -1,7 +1,6 @@
 """
-THETIS Dataset Beginner Keypoint Extraction
-Processes beginner-level (p1-p31) forehand and backhand videos
-through MediaPipe Pose for use as ML training data.
+Extracts keypoints from THETIS beginner players (p1-p31)
+via MediaPipe Pose.
 """
 
 import cv2
@@ -25,7 +24,6 @@ BEGINNER_RANGE = range(1, 32)
 
 
 def is_beginner(filename):
-    """Check if a video filename belongs to a beginner player (p1-p31)."""
     name = Path(filename).stem
     player_part = name.split("_")[0]
     try:
@@ -36,47 +34,31 @@ def is_beginner(filename):
 
 
 def extract_keypoints_from_video(video_path):
-    """Extract pose keypoints from a video using MediaPipe Pose."""
     cap = cv2.VideoCapture(str(video_path))
-    
     if not cap.isOpened():
         return None, None, 0, 0
-    
+
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
     all_keypoints = []
     detected_frames = 0
-    
-    with mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=2,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    ) as pose:
-        
+
+    with mp_pose.Pose(static_image_mode=False, model_complexity=2,
+                      min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = pose.process(rgb_frame)
-            
+            results = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             if results.pose_landmarks:
-                frame_keypoints = []
-                for landmark in results.pose_landmarks.landmark:
-                    frame_keypoints.append([landmark.x, landmark.y])
-                all_keypoints.append(frame_keypoints)
+                all_keypoints.append([[lm.x, lm.y] for lm in results.pose_landmarks.landmark])
                 detected_frames += 1
             else:
                 all_keypoints.append([[0.0, 0.0]] * 33)
-    
+
     cap.release()
-    
-    if len(all_keypoints) == 0:
+    if not all_keypoints:
         return None, fps, total_frames, 0
-    
     return np.array(all_keypoints), fps, total_frames, detected_frames
 
 

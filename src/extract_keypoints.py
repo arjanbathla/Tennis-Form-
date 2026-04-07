@@ -1,7 +1,6 @@
 """
-Tennis Stroke Keypoint Extraction
-Processes all recorded tennis stroke videos through MediaPipe Pose
-and saves the extracted keypoint data as .npy files.
+Runs all recorded stroke videos through MediaPipe Pose,
+saves extracted keypoints as .npy files.
 """
 
 import cv2
@@ -77,7 +76,6 @@ def process_all_videos():
             print(f"\nWARNING: Folder not found: {raw_folder}")
             continue
         
-        # Get all video files
         video_files = sorted([
             f for f in raw_folder.iterdir()
             if f.suffix.lower() in ['.mov', '.mp4', '.avi']
@@ -88,8 +86,6 @@ def process_all_videos():
         for video_file in video_files:
             total_videos += 1
             print(f"\n  Processing: {video_file.name}")
-            
-            # Extract keypoints
             keypoints, fps, total_frames, detected_frames = extract_keypoints_from_video(video_file)
             
             if keypoints is not None and detected_frames > 0:
@@ -121,7 +117,6 @@ def process_all_videos():
             else:
                 print(f"    FAILED: No keypoints extracted")
     
-    # Print summary
     print("\n" + "=" * 60)
     print("EXTRACTION COMPLETE")
     print("=" * 60)

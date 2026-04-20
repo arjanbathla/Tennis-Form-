@@ -20,11 +20,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pathlib import Path
 from dtw import dtw
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier, StackingClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, auc
+from scipy.stats import pearsonr
 import math
 import warnings
 import plotly.graph_objects as go
@@ -218,6 +222,48 @@ def process_uploaded_video(video_path):
     return np.array(all_kp), out_path, {"fps":fps,"total_frames":total,"detected_frames":detected,
         "detection_rate":round(detected/total*100,1) if total>0 else 0}
 
+def convert_avi_to_mp4(avi_path):
+    cap = cv2.VideoCapture(str(avi_path))
+    if not cap.isOpened():
+        return None
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    tmpfile = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    tmpfile.close()
+    out = cv2.VideoWriter(tmpfile.name, cv2.VideoWriter_fourcc(*"avc1"), fps, (w, h))
+    while True:
+        ret, frame = cap.read()
+        if not ret: break
+        out.write(frame)
+    cap.release(); out.release()
+    return tmpfile.name
+
+
+def render_skeleton_video(kp_norm, fps=25.0, canvas_size=(480, 640), torso_px=110):
+    w, h = canvas_size
+    out_path = tempfile.mktemp(suffix=".mp4")
+    out = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"avc1"), fps, (w, h))
+    edges = [(0, 1), (6, 7), (0, 6), (1, 7),
+             (0, 2), (2, 4), (1, 3), (3, 5),
+             (6, 8), (8, 10), (7, 9), (9, 11)]
+    cx, cy = w // 2, h // 2
+    for frame_kp in kp_norm:
+        canvas = np.full((h, w, 3), 28, dtype=np.uint8)
+        pts = []
+        for jx, jy in frame_kp:
+            x = int(cx + jx * torso_px)
+            y = int(cy + jy * torso_px)
+            pts.append((x, y))
+        for a, b in edges:
+            cv2.line(canvas, pts[a], pts[b], (89, 124, 74), 2)
+        for x, y in pts:
+            cv2.circle(canvas, (x, y), 4, (230, 230, 230), -1)
+        out.write(canvas)
+    out.release()
+    return out_path
+
+
 def preprocess_keypoints(kp):
     sums = np.sum(np.abs(kp), axis=(1,2))
     kp = kp[sums > 0]
@@ -254,6 +300,24 @@ def compare_against_experts(prep, stroke_type):
     ap = {j: np.mean(d) for j, d in pj.items()}
     return {"overall_distance":round(float(ao),4), "similarity_score":round(100*np.exp(-ao),1),
             "per_joint_distances":{k:round(float(v),4) for k,v in ap.items()}}, ap
+
+
+def find_closest_experts(prep, stroke_type):
+    folder = PREPROCESSED_DIR / "thetis" / stroke_type
+    if not folder.exists(): return []
+    files = sorted([f for f in folder.iterdir() if f.name.endswith("_preprocessed.npy")])
+    fp = prep.reshape(len(prep), -1)
+    results = []
+    for ef in files:
+        exp = np.load(str(ef))
+        fe = exp.reshape(len(exp), -1)
+        d = dtw(fp, fe, keep_internals=False).normalizedDistance
+        pid = ef.name.split("_")[0]
+        results.append({"player_id": pid, "file": ef.name,
+                        "distance": float(d),
+                        "similarity": round(100 * float(np.exp(-d)), 1)})
+    results.sort(key=lambda r: r["distance"])
+    return results
 
 def pad_single(seq):
     flat = seq.reshape(len(seq),-1)
@@ -330,6 +394,45 @@ def extract_features(kp):
     else: f.extend([0,0])
     return np.array(f)
 
+PARAM_GRIDS = {
+    "Random Forest": {
+        "clf__n_estimators": [50, 100, 200],
+        "clf__max_depth": [5, 10, 20, None],
+        "clf__min_samples_leaf": [1, 2, 4],
+        "clf__min_samples_split": [2, 5, 10],
+        "clf__class_weight": ["balanced"],
+    },
+    "SVM": {
+        "clf__C": [0.1, 1.0, 10.0],
+        "clf__kernel": ["rbf", "linear"],
+        "clf__gamma": ["scale", "auto"],
+        "clf__class_weight": ["balanced"],
+    },
+    "KNN": {
+        "clf__n_neighbors": [3, 5, 7, 9],
+        "clf__weights": ["uniform", "distance"],
+        "clf__metric": ["euclidean", "manhattan"],
+    },
+}
+
+def _tune_classifiers(X, y):
+    base_clfs = {
+        "Random Forest": RandomForestClassifier(random_state=42),
+        "SVM": SVC(probability=True, random_state=42),
+        # algorithm='ball_tree' avoids sklearn's ArgKminClassMode fast path,
+        # which crashes on string labels in sklearn >=1.5.
+        "KNN": KNeighborsClassifier(algorithm="ball_tree"),
+    }
+    tuned = {}
+    for name, clf in base_clfs.items():
+        pipe = Pipeline([("scaler", StandardScaler()), ("clf", clf)])
+        gs = GridSearchCV(pipe, PARAM_GRIDS[name], cv=5, scoring="accuracy", n_jobs=-1)
+        gs.fit(X, y)
+        tuned[name] = gs.best_estimator_
+        print(f"[GridSearchCV] {name} best params: {gs.best_params_}  (cv acc={gs.best_score_:.4f})")
+    return tuned
+
+
 @st.cache_resource
 def train_ml():
     ef, bf = [], []
@@ -342,11 +445,25 @@ def train_ml():
     if not ef or not bf: return None
     X = np.nan_to_num(np.array(ef+bf))
     y = np.array(["expert"]*len(ef)+["beginner"]*len(bf))
-    models = {}
-    for n, c in [("Random Forest",RandomForestClassifier(n_estimators=100,max_depth=10,random_state=42,class_weight="balanced")),
-                 ("SVM",SVC(kernel="rbf",C=1.0,probability=True,class_weight="balanced",random_state=42)),
-                 ("KNN",KNeighborsClassifier(n_neighbors=5,weights="distance"))]:
-        p = Pipeline([("scaler",StandardScaler()),("clf",c)]); p.fit(X,y); models[n] = p
+
+    models = _tune_classifiers(X, y)
+
+    base_est = [
+        ("rf", models["Random Forest"]),
+        ("svm", models["SVM"]),
+        ("knn", models["KNN"]),
+    ]
+    voting = VotingClassifier(estimators=base_est, voting="soft")
+    voting.fit(X, y)
+    models["Soft Voting Ensemble"] = voting
+
+    stacking = StackingClassifier(
+        estimators=base_est,
+        final_estimator=LogisticRegression(max_iter=1000, random_state=42),
+        cv=5,
+    )
+    stacking.fit(X, y)
+    models["Stacking Ensemble"] = stacking
     return models
 
 def ml_predict(models, prep):
@@ -356,9 +473,217 @@ def ml_predict(models, prep):
                "expert_probability":round(float(p.predict_proba(f)[0][np.where(p.classes_=="expert")[0][0]]),4)}
             for n,p in models.items()}
 
-def generate_feedback(pj):
+def get_rf_joint_importance(models):
+    if not models or "Random Forest" not in models: return None
+    rf = models["Random Forest"].named_steps["clf"]
+    imp = rf.feature_importances_
+    joint_imp = {j: 0.0 for j in JOINT_NAMES}
+    # feature 0 = sequence length, skip
+    # features 1-120 = positional stats, 10 per joint
+    for i in range(1, 121):
+        ji = (i - 1) // 10
+        joint_imp[JOINT_NAMES[ji]] += imp[i]
+    # features 121-156 = velocity stats, 3 per joint
+    for i in range(121, 157):
+        ji = (i - 121) // 3
+        joint_imp[JOINT_NAMES[ji]] += imp[i]
+    # features 157-186 = angle stats, 5 per angle
+    # 6 angles, middle joint of each triplet:
+    # (0,2,4) -> elbow L=2, (1,3,5) -> elbow R=3,
+    # (6,8,10) -> knee L=8, (7,9,11) -> knee R=9,
+    # (2,0,6) -> shoulder L=0, (3,1,7) -> shoulder R=1
+    angle_joints = [2, 3, 8, 9, 0, 1]
+    for i in range(157, 187):
+        ai = (i - 157) // 5
+        joint_imp[JOINT_NAMES[angle_joints[ai]]] += imp[i]
+    # features 187-188 = movement ratios, skip
+    max_imp = max(joint_imp.values()) if max(joint_imp.values()) > 0 else 1.0
+    return {j: v / max_imp for j, v in joint_imp.items()}
+
+
+@st.cache_resource(show_spinner="Running unified evaluation...")
+def unified_evaluation():
+    samples = []
+    for stroke in ["forehand", "backhand"]:
+        for level, label in [("thetis", "expert"), ("thetis_beginners", "beginner")]:
+            fd = PREPROCESSED_DIR / level / stroke
+            if not fd.exists(): continue
+            for fl in sorted(fd.iterdir()):
+                if fl.name.endswith("_preprocessed.npy"):
+                    samples.append({"path": str(fl), "label": label, "stroke": stroke})
+
+    if len(samples) < 10:
+        return None, 0
+
+    labels = [s["label"] for s in samples]
+    idx_tr, idx_te = train_test_split(list(range(len(samples))), test_size=0.25,
+                                      stratify=labels, random_state=42)
+    train = [samples[i] for i in idx_tr]
+    test = [samples[i] for i in idx_te]
+
+    Xtr = np.array([np.nan_to_num(extract_features(np.load(s["path"]))) for s in train])
+    ytr = np.array([s["label"] for s in train])
+    Xte = np.array([np.nan_to_num(extract_features(np.load(s["path"]))) for s in test])
+    yte = np.array([s["label"] for s in test])
+
+    ml = _tune_classifiers(Xtr, ytr)
+
+    preds = {n: ml[n].predict(Xte) for n in ml}
+
+    train_experts = {}
+    for s in train:
+        if s["label"] == "expert":
+            train_experts.setdefault(s["stroke"], []).append(s["path"])
+
+    sm = load_siamese_model()
+    rng = np.random.RandomState(42)
+    K = 10
+
+    dtw_preds, siam_preds = [], []
+    for s in test:
+        kp = np.load(s["path"])
+        flat = kp.reshape(len(kp), -1)
+        refs = train_experts.get(s["stroke"], [])
+        if len(refs) > K:
+            refs = list(rng.choice(refs, K, replace=False))
+
+        if not refs:
+            dtw_preds.append("beginner")
+            siam_preds.append("beginner")
+            continue
+
+        ds = []
+        for ref in refs:
+            exp = np.load(ref)
+            fe = exp.reshape(len(exp), -1)
+            ds.append(dtw(flat, fe, keep_internals=False).normalizedDistance)
+        sim = 100 * np.exp(-np.mean(ds))
+        dtw_preds.append("expert" if sim > 50 else "beginner")
+
+        if sm is not None:
+            pp, pm = pad_single(kp)
+            sd = []
+            for ref in refs:
+                ep, em = pad_single(np.load(ref))
+                with torch.no_grad():
+                    d, _, _ = sm(pp, ep, pm, em)
+                    sd.append(d.item())
+            siam_preds.append("expert" if np.mean(sd) < 0.5 else "beginner")
+        else:
+            siam_preds.append("beginner")
+
+    preds["DTW (sim > 50%)"] = np.array(dtw_preds)
+    preds["Siamese (d < 0.5)"] = np.array(siam_preds)
+
+    rows = []
+    for method, yhat in preds.items():
+        rows.append({
+            "method": method,
+            "accuracy": round(accuracy_score(yte, yhat), 4),
+            "precision": round(precision_score(yte, yhat, pos_label="expert", zero_division=0), 4),
+            "recall": round(recall_score(yte, yhat, pos_label="expert", zero_division=0), 4),
+            "f1": round(f1_score(yte, yhat, pos_label="expert", zero_division=0), 4),
+        })
+
+    df = pd.DataFrame(rows)
+    RESULTS_DIR.mkdir(exist_ok=True)
+    df.to_csv(RESULTS_DIR / "unified_comparison.csv", index=False)
+    return df, len(test)
+
+
+@st.cache_resource(show_spinner="Running full DTW + siamese sweep across 330 recordings (one-off, takes a couple of minutes)...")
+def method_comparison_eval():
+    samples = []
+    for stroke in ["forehand", "backhand"]:
+        for level, label in [("thetis", "expert"), ("thetis_beginners", "beginner")]:
+            fd = PREPROCESSED_DIR / level / stroke
+            if not fd.exists(): continue
+            for fl in sorted(fd.iterdir()):
+                if fl.name.endswith("_preprocessed.npy"):
+                    samples.append({"video": fl.stem.replace("_preprocessed", ""),
+                                    "path": str(fl), "label": label, "stroke": stroke})
+    if not samples:
+        return None
+
+    expert_paths = {"forehand": [], "backhand": []}
+    for s in samples:
+        if s["label"] == "expert":
+            expert_paths[s["stroke"]].append(s["path"])
+
+    rng = np.random.RandomState(42)
+    K_DTW = 15
+    dtw_refs = {}
+    for stroke, paths in expert_paths.items():
+        if len(paths) > K_DTW:
+            dtw_refs[stroke] = list(rng.choice(paths, K_DTW, replace=False))
+        else:
+            dtw_refs[stroke] = list(paths)
+
+    dtw_ref_arrays = {}
+    for stroke, paths in dtw_refs.items():
+        dtw_ref_arrays[stroke] = [(p, np.load(p).reshape(-1, 24)) for p in paths]
+
+    sm = load_siamese_model()
+    expert_emb = {}
+    if sm is not None:
+        for stroke, paths in expert_paths.items():
+            embs = []
+            for p in paths:
+                pt, pm = pad_single(np.load(p))
+                with torch.no_grad():
+                    e = sm.get_embedding(pt, pm).squeeze(0).numpy()
+                embs.append(e)
+            expert_emb[stroke] = (paths, np.array(embs))
+
+    rows = []
+    for s in samples:
+        kp = np.load(s["path"])
+        flat = kp.reshape(len(kp), -1)
+
+        dists_d = []
+        for (rp, ra) in dtw_ref_arrays[s["stroke"]]:
+            if rp == s["path"]:
+                continue
+            dists_d.append(dtw(flat, ra, keep_internals=False).normalizedDistance)
+        dtw_sim = 100 * np.exp(-np.mean(dists_d)) if dists_d else 0.0
+
+        siam_dist = float("nan")
+        if sm is not None and s["stroke"] in expert_emb:
+            pt, pm = pad_single(kp)
+            with torch.no_grad():
+                target_e = sm.get_embedding(pt, pm).squeeze(0).numpy()
+            ref_paths, ref_embs = expert_emb[s["stroke"]]
+            mask = np.array([p != s["path"] for p in ref_paths])
+            pool = ref_embs[mask]
+            diffs = pool - target_e
+            siam_dist = float(np.mean(np.sqrt(np.sum(diffs * diffs, axis=1))))
+
+        rows.append({
+            "video": s["video"],
+            "label": s["label"],
+            "stroke": s["stroke"],
+            "dtw_sim": round(float(dtw_sim), 3),
+            "siam_dist": round(siam_dist, 4),
+            "dtw_pred": "expert" if dtw_sim > 50 else "beginner",
+            "siam_pred": "expert" if (not np.isnan(siam_dist) and siam_dist < 0.5) else "beginner",
+        })
+
+    df = pd.DataFrame(rows).reset_index(drop=True)
+    RESULTS_DIR.mkdir(exist_ok=True)
+    df.to_csv(RESULTS_DIR / "method_comparison_full.csv", index=False)
+    return df
+
+
+def generate_feedback(pj, rf_importance=None):
     items = []
-    for jn,dist in sorted(pj.items(), key=lambda x:x[1], reverse=True):
+    scored = {}
+    for jn, dist in pj.items():
+        if rf_importance and jn in rf_importance:
+            scored[jn] = dist * (1 + rf_importance[jn])
+        else:
+            scored[jn] = dist
+    for jn,_ in sorted(scored.items(), key=lambda x:x[1], reverse=True):
+        dist = pj[jn]
         fb = JOINT_FEEDBACK.get(jn)
         if not fb: continue
         if dist<0.2: lv,ic = "good","✅"
@@ -379,360 +704,239 @@ def get_ball_type(f): return "Shadow Swing" if "without_ball" in f else "With Ba
 
 
 def score_color(score):
-    if score >= 40: return "#22C55E"
-    elif score >= 25: return "#F59E0B"
-    return "#EF4444"
-
-def score_bg(score):
-    if score >= 40: return "#DCFCE7"
-    elif score >= 25: return "#FEF3C7"
-    return "#FEE2E2"
+    if score >= 40: return "#4A7C59"
+    elif score >= 25: return "#8B6E4E"
+    return "#A0522D"
 
 def score_label(score):
-    if score >= 40: return "Good"
-    elif score >= 25: return "Fair"
-    return "Needs Work"
+    if score >= 40: return "good"
+    elif score >= 25: return "fair"
+    return "poor"
 
 def dist_color(d):
-    if d < 0.2: return "#22C55E"
-    elif d < 0.4: return "#F59E0B"
-    return "#EF4444"
-
-CHART_COLORS = {
-    "primary": "#1E40AF",
-    "secondary": "#3B82F6",
-    "accent": "#F59E0B",
-    "success": "#22C55E",
-    "warning": "#F59E0B",
-    "danger": "#EF4444",
-    "muted": "#94A3B8",
-}
+    if d < 0.2: return "#4A7C59"
+    elif d < 0.4: return "#8B6E4E"
+    return "#A0522D"
 
 def base_layout(title="", height=400, showlegend=True):
     return dict(
-        title=dict(text=title, font=dict(size=15, color="#1E293B", family="Inter, sans-serif"), x=0, xanchor="left"),
+        title=dict(text=title, font=dict(size=13, color="#1C2B1E"), x=0, xanchor="left"),
         height=height,
-        paper_bgcolor="white",
-        plot_bgcolor="#F8FAFC",
-        font=dict(family="Inter, sans-serif", color="#334155", size=12),
-        margin=dict(t=55 if title else 30, b=45, l=55, r=20),
+        paper_bgcolor="#FAFAF5",
+        plot_bgcolor="#FAFAF5",
+        font=dict(color="#1C2B1E", size=11),
+        margin=dict(t=40 if title else 20, b=40, l=55, r=15),
         showlegend=showlegend,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                    bgcolor="rgba(0,0,0,0)", borderwidth=0, font=dict(size=12)),
-        xaxis=dict(gridcolor="#E2E8F0", linecolor="#CBD5E1", tickfont=dict(size=11), zeroline=False),
-        yaxis=dict(gridcolor="#E2E8F0", linecolor="#CBD5E1", tickfont=dict(size=11), zeroline=False),
+                    bgcolor="rgba(0,0,0,0)", borderwidth=0, font=dict(size=11)),
+        xaxis=dict(gridcolor="#D8DCC9", linecolor="#D8DCC9", tickfont=dict(size=10), zeroline=False),
+        yaxis=dict(gridcolor="#D8DCC9", linecolor="#D8DCC9", tickfont=dict(size=10), zeroline=False),
     )
 
+
+def run_integrity_check():
+    """Check that all five methods use the same test set and consistent thresholds."""
+    issues = []
+
+    # rebuild the same sample list + split used by unified_evaluation
+    samples = []
+    for stroke in ["forehand", "backhand"]:
+        for level, label in [("thetis", "expert"), ("thetis_beginners", "beginner")]:
+            fd = PREPROCESSED_DIR / level / stroke
+            if not fd.exists():
+                continue
+            for fl in sorted(fd.iterdir()):
+                if fl.name.endswith("_preprocessed.npy"):
+                    samples.append({"path": str(fl), "label": label, "stroke": stroke})
+
+    if len(samples) < 10:
+        print("[integrity] not enough data to check")
+        return
+
+    labels = [s["label"] for s in samples]
+    _, idx_te = train_test_split(list(range(len(samples))), test_size=0.25,
+                                  stratify=labels, random_state=42)
+    expected_n = len(idx_te)
+
+    # 1 — check unified_comparison.csv has exactly 83 rows per method
+    csv_path = RESULTS_DIR / "unified_comparison.csv"
+    if csv_path.exists():
+        udf = pd.read_csv(csv_path)
+        methods_found = list(udf["method"])
+        expected_methods = ["Random Forest", "SVM", "KNN", "DTW (sim > 50%)", "Siamese (d < 0.5)"]
+        for m in expected_methods:
+            if m not in methods_found:
+                issues.append(f"missing method '{m}' in unified_comparison.csv")
+        if len(udf) != len(expected_methods):
+            issues.append(f"unified_comparison.csv has {len(udf)} rows, expected {len(expected_methods)}")
+    else:
+        issues.append("unified_comparison.csv not found")
+
+    if expected_n != 83:
+        issues.append(f"test split produced {expected_n} samples, expected 83")
+
+    # 2 — positive class must be 'expert' everywhere
+    import inspect
+    src_app = inspect.getsource(unified_evaluation)
+    if "pos_label=\"expert\"" not in src_app and "pos_label='expert'" not in src_app:
+        issues.append("unified_evaluation may not use pos_label='expert'")
+
+    # 3 — DTW threshold sim > 50 and siamese threshold d < 0.5
+    app_src = Path(__file__).read_text()
+    dtw_thresh_count = app_src.count("sim > 50")
+    siam_thresh_count = app_src.count("< 0.5")
+    if dtw_thresh_count < 2:
+        issues.append(f"DTW threshold 'sim > 50' found {dtw_thresh_count} times, expected at least 2")
+    if siam_thresh_count < 2:
+        issues.append(f"Siamese threshold '< 0.5' found {siam_thresh_count} times, expected at least 2")
+
+    # print summary
+    print("")
+    if not issues:
+        print(f"Evaluation consistency check: PASSED (n={expected_n}, 5 methods, pos_class=expert, thresholds ok)")
+    else:
+        print("Evaluation consistency check: FAILED")
+        for iss in issues:
+            print(f"  - {iss}")
+    print("")
+
+
+run_integrity_check()
 
 st.set_page_config(page_title="TennisForm", page_icon="🎾", layout="wide")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap');
+html, body, [data-testid="stApp"] { background-color: #FAFAF5; color: #1C2B1E; }
 
-html, body, [data-testid="stApp"] {
-    font-family: 'Inter', sans-serif;
-    background-color: #F1F5F9;
-}
+[data-testid="stSidebar"] { background-color: #EEF0E8 !important; border-right: 1px solid #D8DCC9 !important; }
 
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0F172A 0%, #1E293B 100%) !important;
-    border-right: 1px solid #1E293B !important;
-}
-[data-testid="stSidebar"] > div:first-child {
-    background: linear-gradient(180deg, #0F172A 0%, #1E293B 100%) !important;
-}
-section[data-testid="stSidebar"] .stRadio label {
-    color: #94A3B8 !important;
-    font-size: 14px !important;
-    font-weight: 500 !important;
-    padding: 4px 0 !important;
-    transition: color 0.15s !important;
-}
-section[data-testid="stSidebar"] .stRadio label:hover {
-    color: #F1F5F9 !important;
-}
-section[data-testid="stSidebar"] .stMarkdown p,
-section[data-testid="stSidebar"] .stMarkdown div,
-section[data-testid="stSidebar"] p {
-    color: #64748B !important;
-}
+.main .block-container { padding: 1.5rem 2rem 3rem !important; max-width: 1200px !important; }
 
-/* Main container */
-.main .block-container {
-    padding: 2rem 2.5rem 3rem !important;
-    max-width: 1400px !important;
-}
+[data-testid="stMetric"] { background: transparent !important; border: none !important; padding: 0.25rem 0 !important; box-shadow: none !important; }
+[data-testid="stMetricLabel"] > div { color: #5A6B55 !important; font-size: 12px !important; font-weight: 400 !important; text-transform: none !important; letter-spacing: 0 !important; }
+[data-testid="stMetricValue"] > div { color: #1C2B1E !important; font-weight: 600 !important; font-size: 1.5rem !important; }
 
-/* Metric cards */
-[data-testid="stMetric"] {
-    background: white !important;
-    border-radius: 14px !important;
-    padding: 1.25rem !important;
-    border: 1px solid #E2E8F0 !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.05) !important;
-}
-[data-testid="stMetricLabel"] > div {
-    color: #64748B !important;
-    font-size: 11px !important;
-    font-weight: 600 !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.8px !important;
-    font-family: 'Inter', sans-serif !important;
-}
-[data-testid="stMetricValue"] > div {
-    color: #1E40AF !important;
-    font-family: 'Fira Code', monospace !important;
-    font-weight: 700 !important;
-    font-size: 1.9rem !important;
-}
+h1 { color: #1C2B1E !important; font-weight: 600 !important; letter-spacing: 0 !important; }
+h2, h3 { color: #1C2B1E !important; font-weight: 600 !important; }
 
-/* Headings */
-h1 {
-    color: #0F172A !important;
-    font-weight: 800 !important;
-    letter-spacing: -0.5px !important;
-    font-family: 'Inter', sans-serif !important;
-}
-h2 { color: #1E293B !important; font-weight: 700 !important; }
-h3 { color: #334155 !important; font-weight: 600 !important; }
+.stButton > button { background: #4A7C59 !important; color: #FAFAF5 !important; border: 1px solid #3A6248 !important; border-radius: 2px !important; font-weight: 500 !important; box-shadow: none !important; }
+.stButton > button:hover { background: #3A6248 !important; transform: none !important; box-shadow: none !important; }
 
-/* Primary button */
-.stButton > button {
-    background: linear-gradient(135deg, #1E40AF, #2563EB) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    font-family: 'Inter', sans-serif !important;
-    padding: 0.5rem 1.5rem !important;
-    transition: box-shadow 0.2s, transform 0.15s !important;
-    cursor: pointer !important;
-}
-.stButton > button:hover {
-    box-shadow: 0 4px 14px rgba(30, 64, 175, 0.45) !important;
-    transform: translateY(-1px) !important;
-}
+[data-testid="stFileUploader"] { background: #EEF0E8 !important; border: 1px dashed #8A9B7E !important; border-radius: 2px !important; }
 
-/* File uploader */
-[data-testid="stFileUploader"] {
-    background: #F8FAFC !important;
-    border: 2px dashed #CBD5E1 !important;
-    border-radius: 14px !important;
-    transition: border-color 0.2s, background 0.2s !important;
-}
-[data-testid="stFileUploader"]:hover {
-    border-color: #3B82F6 !important;
-    background: #EFF6FF !important;
-}
+[data-testid="stDataFrame"] { border: 1px solid #D8DCC9 !important; border-radius: 0 !important; }
 
-/* DataFrames */
-[data-testid="stDataFrame"] {
-    border-radius: 10px !important;
-    overflow: hidden !important;
-    border: 1px solid #E2E8F0 !important;
+[data-testid="stAlert"] { border-radius: 2px !important; }
+
+[data-testid="stExpander"] { border: 1px solid #D8DCC9 !important; border-radius: 2px !important; background: #FAFAF5 !important; }
+
+hr { border-color: #D8DCC9 !important; margin: 1rem 0 !important; }
+
+/* sidebar nav buttons */
+section[data-testid="stSidebar"] .stButton > button {
+    background: transparent !important; color: #1C2B1E !important; border: none !important;
+    text-align: left !important; padding: 6px 12px !important; font-weight: 400 !important;
+    border-left: 3px solid transparent !important; border-radius: 0 !important;
 }
-
-/* Alerts */
-[data-testid="stAlert"] { border-radius: 10px !important; }
-.stInfo, .stSuccess, .stWarning, .stError { border-radius: 10px !important; }
-
-/* Expander */
-details > summary {
-    font-weight: 500 !important;
-    font-family: 'Inter', sans-serif !important;
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: #E2E5D8 !important; color: #1C2B1E !important;
 }
-[data-testid="stExpander"] {
-    border: 1px solid #E2E8F0 !important;
-    border-radius: 10px !important;
-    overflow: hidden !important;
+.navitem-selected {
+    padding: 6px 12px; border-left: 3px solid #4A7C59; background: #E2E5D8;
+    color: #1C2B1E; font-weight: 500; font-size: 14px;
 }
+.navgroup { font-size: 11px; letter-spacing: 1px; color: #6B7A63; margin: 18px 12px 6px; font-weight: 500; }
+.sidefoot { font-size: 11px; color: #6B7A63; margin: 24px 12px 8px; font-family: monospace; }
+.logo { font-size: 1.3rem; font-weight: 600; color: #1C2B1E; padding: 20px 12px 8px; }
 
-/* Divider */
-hr { border-color: #E2E8F0 !important; margin: 1.5rem 0 !important; }
-
-/* Radio buttons in main area */
-.stRadio > label {
-    font-weight: 600 !important;
-    color: #334155 !important;
-}
-
-/* Spinner text */
-.stSpinner p { color: #64748B !important; }
-
-/* Selectbox */
-[data-testid="stSelectbox"] > div > div {
-    border-radius: 8px !important;
-    border-color: #CBD5E1 !important;
-}
+/* section label — no colored underline */
+.sec { font-size: 14px; font-weight: 600; color: #1C2B1E; margin: 18px 0 10px; border-bottom: 1px solid #D8DCC9; padding-bottom: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
 
+if "page" not in st.session_state:
+    st.session_state.page = "Overview"
+
+ANALYSIS_PAGES = ["Overview", "Analyse My Stroke"]
+RESULTS_PAGES = ["DTW Analysis", "ML Classification", "Siamese Transformer", "Method Comparison", "Individual Stroke"]
+
+def nav_item(label):
+    if st.session_state.page == label:
+        st.markdown(f"<div class='navitem-selected'>{label}</div>", unsafe_allow_html=True)
+    else:
+        if st.button(label, key=f"nav_{label}", use_container_width=True):
+            st.session_state.page = label
+            st.rerun()
+
 with st.sidebar:
-    st.markdown("""
-    <div style="text-align:center; padding: 1.75rem 1rem 1.25rem; border-bottom: 1px solid #1E293B; margin-bottom: 0.75rem;">
-        <div style="font-size: 1.65rem; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; font-family: 'Inter', sans-serif; line-height: 1;">
-            TennisForm
-        </div>
-        <div style="font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 2.5px; margin-top: 6px; font-family: 'Inter', sans-serif;">
-            AI Stroke Analysis
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<div class='logo'>TennisForm</div>", unsafe_allow_html=True)
+    st.markdown("<div class='navgroup'>ANALYSIS</div>", unsafe_allow_html=True)
+    for p in ANALYSIS_PAGES:
+        nav_item(p)
+    st.markdown("<div class='navgroup'>RESULTS</div>", unsafe_allow_html=True)
+    for p in RESULTS_PAGES:
+        nav_item(p)
+    st.markdown("<div class='sidefoot'>81 videos &middot; 3 methods</div>", unsafe_allow_html=True)
 
-    page = st.radio(
-        "Navigation",
-        ["Overview", "Analyse My Stroke", "DTW Analysis", "ML Classification",
-         "Siamese Transformer", "Method Comparison", "Individual Stroke"],
-        label_visibility="collapsed"
-    )
+page = st.session_state.page
 
-    st.markdown("""
-    <div style="margin-top: 2.5rem; padding: 0.875rem 1rem; background: rgba(255,255,255,0.04);
-         border-radius: 10px; border: 1px solid #1E293B;">
-        <div style="font-size: 11px; color: #475569; font-family: 'Inter', sans-serif; line-height: 1.6;">
-            <span style="color: #64748B;">Final Year Project</span><br>
-            <span style="color: #94A3B8; font-weight: 600;">Nanyang Technological University</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
 
 
 if page == "Overview":
-    st.markdown("""
-    <div style="margin-bottom: 1.75rem;">
-        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0; letter-spacing: -0.5px;">
-            TennisForm
-        </h1>
-        <p style="color: #64748B; font-size: 1rem; margin-top: 6px; margin-bottom: 0;">
-            AI-powered tennis stroke analysis — compare your technique against professional players
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# TennisForm")
+    st.write("Pose-based expert/beginner stroke classification compared across five methods on the same held-out test set.")
 
-    dd = load_json("dtw_comparison_results.json")
-    sd = load_json("siamese_transformer_results.json")
-    md = load_json("ml_classification_results.json")
+    res = unified_evaluation()
+    if res is None or res[0] is None:
+        st.error("Not enough preprocessed data to run unified evaluation.")
+    else:
+        df, n_test = res
+        st.info("All methods evaluated on the same held-out test set: n=83, stratified 75/25 split, seed=42, positive class = expert.")
+        st.caption(f"Held-out test size: n = {n_test} (stratified 75/25 split, seed=42). Pos class = expert.")
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Videos Analysed", "81" if dd else "N/A")
-    with c2:
-        if dd:
-            st.metric("Avg DTW Similarity", f"{np.mean([r['similarity_score'] for r in dd]):.1f}%")
-        else:
-            st.metric("Avg DTW Similarity", "N/A")
-    with c3:
-        if sd:
-            st.metric("Avg Siamese Similarity", f"{np.mean([r['siamese_similarity'] for r in sd]):.1f}%")
-        else:
-            st.metric("Avg Siamese Similarity", "N/A")
-    with c4:
-        if md:
-            st.metric("Best ML Accuracy", f"{max(v['cv_accuracy_mean'] for v in md.values()):.1%}")
-        else:
-            st.metric("Best ML Accuracy", "N/A")
+        num_cols = ["accuracy", "precision", "recall", "f1"]
 
-    st.markdown('<div style="height: 1.5rem;"></div>', unsafe_allow_html=True)
+        def highlight_max(col):
+            is_max = col == col.max()
+            return ['background-color: #D8E3CE; font-weight: 600' if v else '' for v in is_max]
 
-    st.markdown("""
-    <div style="font-size: 1rem; font-weight: 700; color: #1E293B; margin-bottom: 1rem;
-         padding-bottom: 0.5rem; border-bottom: 2px solid #1E40AF; display: inline-block;">
-        Analysis Methods
-    </div>
-    """, unsafe_allow_html=True)
+        styled = (df.style
+                  .apply(highlight_max, subset=num_cols)
+                  .format({c: "{:.3f}" for c in num_cols}))
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+        st.caption("Saved to results/unified_comparison.csv")
 
-    mc1, mc2, mc3 = st.columns(3)
-    with mc1:
-        st.markdown("""
-        <div style="background:white; border-radius:14px; padding:1.5rem; border:1px solid #E2E8F0;
-             box-shadow:0 1px 3px rgba(0,0,0,0.07); height:100%;">
-            <div style="width:42px;height:42px;background:#EFF6FF;border-radius:10px;
-                 display:flex;align-items:center;justify-content:center;margin-bottom:1rem;">
-                <svg width="20" height="20" fill="none" stroke="#1E40AF" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-                </svg>
-            </div>
-            <div style="font-size:0.95rem; font-weight:700; color:#1E293B; margin-bottom:0.5rem;">DTW Analysis</div>
-            <div style="font-size:13px; color:#64748B; line-height:1.65;">
-                Dynamic Time Warping measures temporal shape similarity between your stroke
-                and expert sequences, robust to differences in speed.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    with mc2:
-        st.markdown("""
-        <div style="background:white; border-radius:14px; padding:1.5rem; border:1px solid #E2E8F0;
-             box-shadow:0 1px 3px rgba(0,0,0,0.07); height:100%;">
-            <div style="width:42px;height:42px;background:#ECFDF5;border-radius:10px;
-                 display:flex;align-items:center;justify-content:center;margin-bottom:1rem;">
-                <svg width="20" height="20" fill="none" stroke="#16A34A" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-                </svg>
-            </div>
-            <div style="font-size:0.95rem; font-weight:700; color:#1E293B; margin-bottom:0.5rem;">Siamese Transformer</div>
-            <div style="font-size:13px; color:#64748B; line-height:1.65;">
-                Deep learning model trained on contrastive pairs learns rich stroke embeddings
-                with self-attention to identify the most critical frames.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    with mc3:
-        st.markdown("""
-        <div style="background:white; border-radius:14px; padding:1.5rem; border:1px solid #E2E8F0;
-             box-shadow:0 1px 3px rgba(0,0,0,0.07); height:100%;">
-            <div style="width:42px;height:42px;background:#FFF7ED;border-radius:10px;
-                 display:flex;align-items:center;justify-content:center;margin-bottom:1rem;">
-                <svg width="20" height="20" fill="none" stroke="#EA580C" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
-                </svg>
-            </div>
-            <div style="font-size:0.95rem; font-weight:700; color:#1E293B; margin-bottom:0.5rem;">ML Classification</div>
-            <div style="font-size:13px; color:#64748B; line-height:1.65;">
-                Random Forest, SVM and KNN classifiers trained on engineered biomechanical
-                features to classify expert vs beginner technique.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown('<div style="height: 1.25rem;"></div>', unsafe_allow_html=True)
-    st.info("Upload your stroke video in **Analyse My Stroke** to get personalised AI-powered coaching feedback.")
+    st.write("")
+    st.markdown("**Go to**")
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        if st.button("DTW Analysis", use_container_width=True, key="go_dtw"):
+            st.session_state.page = "DTW Analysis"; st.rerun()
+        if st.button("ML Classification", use_container_width=True, key="go_ml"):
+            st.session_state.page = "ML Classification"; st.rerun()
+    with b2:
+        if st.button("Siamese Transformer", use_container_width=True, key="go_st"):
+            st.session_state.page = "Siamese Transformer"; st.rerun()
+        if st.button("Method Comparison", use_container_width=True, key="go_mc"):
+            st.session_state.page = "Method Comparison"; st.rerun()
+    with b3:
+        if st.button("Individual Stroke", use_container_width=True, key="go_is"):
+            st.session_state.page = "Individual Stroke"; st.rerun()
+        if st.button("Analyse My Stroke", use_container_width=True, key="go_am"):
+            st.session_state.page = "Analyse My Stroke"; st.rerun()
 
 
 elif page == "Analyse My Stroke":
-    st.markdown("""
-    <div style="margin-bottom: 1.5rem;">
-        <h1 style="font-size: 2rem; font-weight: 800; color: #0F172A; margin: 0;">Analyse My Stroke</h1>
-        <p style="color: #64748B; font-size: 0.95rem; margin-top: 6px; margin-bottom: 0;">
-            Upload a video of your stroke and get instant AI-powered coaching feedback
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# Analyse stroke")
+    st.write("Upload a video. Pose is extracted with MediaPipe and compared against THETIS expert samples via DTW + siamese transformer.")
 
     cu, ct = st.columns([2, 1])
     with ct:
-        st.markdown("""
-        <div style="background:white; border-radius:14px; padding:1.25rem; border:1px solid #E2E8F0;
-             box-shadow:0 1px 3px rgba(0,0,0,0.07);">
-            <div style="font-size:13px; font-weight:700; color:#1E293B; text-transform:uppercase;
-                 letter-spacing:0.8px; margin-bottom:0.75rem;">Stroke Type</div>
-        """, unsafe_allow_html=True)
-        stroke_type = st.radio("What stroke is this?", ["forehand", "backhand"], label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown("""
-        <div style="background:#F0FDF4; border-radius:14px; padding:1.25rem; border:1px solid #BBF7D0; margin-top:0.75rem;">
-            <div style="font-size:13px; font-weight:700; color:#16A34A; margin-bottom:0.5rem;">Recording Tips</div>
-            <div style="font-size:12px; color:#374151; line-height:1.7;">
-                Front-on camera angle<br>
-                Full body visible in frame<br>
-                Good consistent lighting<br>
-                One complete stroke per video
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.write("Stroke type:")
+        stroke_type = st.radio("type", ["forehand", "backhand"], label_visibility="collapsed")
+        st.caption("Front-on angle, full body visible, one stroke per clip.")
 
     with cu:
         uploaded = st.file_uploader(
@@ -753,29 +957,19 @@ elif page == "Analyse My Stroke":
         if kp is not None and overlay:
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown('<div style="font-size:13px; font-weight:700; color:#1E293B; margin-bottom:0.5rem; text-transform:uppercase; letter-spacing:0.8px;">Your Video</div>', unsafe_allow_html=True)
+                st.write("**Input**")
                 st.video(tmp_path)
             with c2:
-                st.markdown('<div style="font-size:13px; font-weight:700; color:#1E293B; margin-bottom:0.5rem; text-transform:uppercase; letter-spacing:0.8px;">Skeleton Overlay</div>', unsafe_allow_html=True)
+                st.write("**Skeleton overlay**")
                 st.video(overlay)
 
-            m1, m2, m3 = st.columns(3)
-            with m1: st.metric("Total Frames", info["total_frames"])
-            with m2: st.metric("Pose Detected", f"{info['detection_rate']}%")
-            with m3: st.metric("Frame Rate", f"{info['fps']:.0f} fps")
+            st.write(f"Frames: {info['total_frames']}, detection rate: {info['detection_rate']}%, fps: {info['fps']:.0f}")
 
             st.markdown("---")
             prep = preprocess_keypoints(kp)
 
             if prep is not None:
-                st.markdown(f"""
-                <div style="display:inline-flex;align-items:center;gap:0.5rem;background:#EFF6FF;
-                     border-radius:8px;padding:0.4rem 1rem;border:1px solid #BFDBFE;margin-bottom:1rem;">
-                    <span style="font-size:13px;font-weight:700;color:#1E40AF;text-transform:uppercase;
-                          letter-spacing:0.5px;">Stroke detected:</span>
-                    <span style="font-size:14px;font-weight:600;color:#1E3A8A;">{stroke_type.title()}</span>
-                </div>
-                """, unsafe_allow_html=True)
+                st.write(f"Stroke: **{stroke_type}**")
 
                 with st.spinner("Running DTW comparison against expert database..."):
                     dtw_r, pj = compare_against_experts(prep, stroke_type)
@@ -790,27 +984,15 @@ elif page == "Analyse My Stroke":
                 mlr = ml_predict(mlm, prep) if mlm else None
 
                 if dtw_r:
-                    st.markdown("""
-                    <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
-                         padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                        Similarity Scores
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    s1, s2, s3 = st.columns(3)
                     ds = dtw_r["similarity_score"]
-                    with s1:
-                        st.metric("DTW Similarity", f"{ds}%")
-                    with s2:
-                        if sr:
-                            ss = sr["siamese_similarity"]
-                            st.metric("Siamese Similarity", f"{ss}%")
-                        else:
-                            st.metric("Siamese Similarity", "N/A")
-                    with s3:
-                        if mlr:
-                            expert_votes = sum(1 for m in mlr.values() if m["prediction"] == "expert")
-                            st.metric("ML Consensus", f"{expert_votes}/3 Expert")
+                    sim_line = f"DTW: `{ds}%`"
+                    if sr:
+                        ss = sr["siamese_similarity"]
+                        sim_line += f", Siamese: `{ss}%`"
+                    if mlr and "Stacking Ensemble" in mlr:
+                        stk = mlr["Stacking Ensemble"]
+                        sim_line += f", ML (Stacking): `{stk['prediction']}` ({stk['expert_probability']:.0%} expert)"
+                    st.markdown(f"**Similarity** — {sim_line}")
 
                     scores, labels, colors = [ds], ["DTW"], [score_color(ds)]
                     if sr:
@@ -827,28 +1009,133 @@ elif page == "Analyse My Stroke":
                             marker=dict(color=col, line=dict(width=0)),
                             text=[f"  {val}% — {score_label(val)}"],
                             textposition="inside",
-                            textfont=dict(size=13, color="white", family="Inter, sans-serif"),
+                            textfont=dict(size=12, color="white"),
                             showlegend=False,
                             hovertemplate=f"<b>{lbl}</b>: {val}%<extra></extra>",
                         ))
                         fig.add_trace(go.Bar(
                             x=[100 - val], y=[lbl], orientation="h",
-                            marker=dict(color="#E2E8F0", line=dict(width=0)),
+                            marker=dict(color="#D8DCC9", line=dict(width=0)),
                             showlegend=False, hoverinfo="skip",
                         ))
 
                     layout = base_layout(title="Similarity to Expert Technique (%)", height=130 + 50 * len(scores))
                     layout.update(barmode="stack", xaxis=dict(range=[0, 100], ticksuffix="%",
-                                  gridcolor="#E2E8F0", linecolor="#CBD5E1", tickfont=dict(size=11)),
+                                  gridcolor="#D8DCC9", linecolor="#D8DCC9", tickfont=dict(size=11)),
                                   yaxis=dict(gridcolor="rgba(0,0,0,0)", linecolor="rgba(0,0,0,0)"))
                     fig.update_layout(**layout)
                     st.plotly_chart(fig, use_container_width=True)
 
+                    st.write("**Closest Expert Match**")
+
+                    prep_key = f"{stroke_type}_{hash(prep.tobytes())}"
+                    if st.session_state.get("closest_key") != prep_key:
+                        with st.spinner("Finding closest expert match..."):
+                            st.session_state.closest_ranked = find_closest_experts(prep, stroke_type)
+                        st.session_state.closest_key = prep_key
+                    ranked = st.session_state.closest_ranked
+
+                    if ranked:
+                        best = ranked[0]
+                        st.markdown(f"Your stroke most closely resembles expert player **{best['player_id']}** — similarity `{best['similarity']}%`")
+
+                        top3 = ranked[:3]
+                        names = [r["player_id"] for r in top3]
+                        sims = [r["similarity"] for r in top3]
+                        cols_b = [score_color(s) for s in sims]
+
+                        fig_ce = go.Figure()
+                        fig_ce.add_trace(go.Bar(
+                            x=sims[::-1], y=names[::-1],
+                            orientation="h",
+                            marker=dict(color=cols_b[::-1], line=dict(width=0)),
+                            text=[f"  {s}%" for s in sims[::-1]],
+                            textposition="outside",
+                            textfont=dict(size=11, color="#1C2B1E"),
+                            hovertemplate="<b>Player %{y}</b><br>Similarity: %{x}%<extra></extra>",
+                            showlegend=False,
+                        ))
+                        layout_ce = base_layout(title="Top 3 Closest Expert Matches", height=220, showlegend=False)
+                        layout_ce.update(xaxis=dict(range=[0, 105], ticksuffix="%",
+                                                   gridcolor="#D8DCC9", linecolor="#D8DCC9", tickfont=dict(size=11)),
+                                         yaxis=dict(gridcolor="rgba(0,0,0,0)", linecolor="rgba(0,0,0,0)"),
+                                         margin=dict(l=80, r=40, t=45, b=40))
+                        fig_ce.update_layout(**layout_ce)
+                        st.plotly_chart(fig_ce, use_container_width=True)
+
+                        st.caption("Closest match is based on overall DTW trajectory similarity across all 12 joints.")
+
+                        st.write("**Expert Reference Video**")
+
+                        video_folder = "forehand_flat" if stroke_type == "forehand" else "backhand"
+                        base = best["file"].replace("_preprocessed.npy", "")
+                        expert_video_dir = PROJECT_ROOT / "data" / "thetis" / "dataset-main" / "VIDEO_RGB" / video_folder
+                        candidates = [expert_video_dir / f"{base}.avi",
+                                      expert_video_dir / f"{base}.mp4",
+                                      expert_video_dir / f"{base}.mov"]
+
+                        expert_video = None
+                        for p in candidates:
+                            print(f"[ExpertVideo] Checking {p} — exists={os.path.exists(str(p))}")
+                            if p.exists():
+                                expert_video = p
+                                break
+
+                        if expert_video is None:
+                            print(f"[ExpertVideo] No video found. Directory listing of {expert_video_dir}:")
+                            if expert_video_dir.exists():
+                                for f in sorted(expert_video_dir.iterdir()):
+                                    print(f"  {f.name}")
+                            else:
+                                print(f"  (directory does not exist)")
+                            st.info("Expert reference video not available")
+                        else:
+                            print(f"[ExpertVideo] Using path: {expert_video}")
+
+                            mp4_key = f"expert_mp4_{stroke_type}_{base}"
+                            if st.session_state.get("_expert_mp4_key") != mp4_key:
+                                with st.spinner("Converting expert video to MP4..."):
+                                    st.session_state._expert_mp4 = convert_avi_to_mp4(str(expert_video))
+                                st.session_state._expert_mp4_key = mp4_key
+                            expert_mp4 = st.session_state._expert_mp4
+
+                            skel_key = f"expert_skel_{stroke_type}_{base}"
+                            if st.session_state.get("_expert_skel_key") != skel_key:
+                                with st.spinner("Rendering expert skeleton overlay..."):
+                                    _, exp_overlay, _ = process_uploaded_video(str(expert_video))
+                                    st.session_state._expert_skel = exp_overlay
+                                st.session_state._expert_skel_key = skel_key
+                            expert_skel = st.session_state._expert_skel
+
+                            view = st.radio("View", ["Raw Video", "Skeleton Overlay"],
+                                            horizontal=True, key="expert_view_mode")
+
+                            vc1, vc2 = st.columns(2)
+                            if view == "Raw Video":
+                                with vc1:
+                                    st.write("Your Stroke")
+                                    st.video(tmp_path)
+                                with vc2:
+                                    st.write(f"Closest Expert Match — Player {best['player_id']}")
+                                    if expert_mp4 and os.path.exists(expert_mp4):
+                                        st.video(expert_mp4)
+                                    else:
+                                        st.info("Expert reference video not available")
+                            else:
+                                with vc1:
+                                    st.write("Your Stroke")
+                                    st.video(overlay)
+                                with vc2:
+                                    st.write(f"Closest Expert Match — Player {best['player_id']}")
+                                    if expert_skel and os.path.exists(expert_skel):
+                                        st.video(expert_skel)
+                                    else:
+                                        st.info("Expert skeleton not available")
+
+                            st.write(f"Expert player {best['player_id']} was selected as your closest match based on DTW trajectory similarity ({best['similarity']}% similarity).")
+
                     if mlr:
-                        st.markdown("""
-                        <div style="font-size:13px; font-weight:700; color:#1E293B; margin:0.5rem 0;
-                             text-transform:uppercase; letter-spacing:0.8px;">ML Classification Results</div>
-                        """, unsafe_allow_html=True)
+                        st.write("**ML predictions**")
                         ml_df = pd.DataFrame([
                             {"Model": n,
                              "Prediction": r["prediction"].title(),
@@ -858,12 +1145,7 @@ elif page == "Analyse My Stroke":
                         st.dataframe(ml_df, use_container_width=True, hide_index=True)
 
                     st.markdown("---")
-                    st.markdown("""
-                    <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
-                         padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                        Body Part Breakdown
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.write("**Joint deviations**")
 
                     sj = sorted(pj.items(), key=lambda x: x[1], reverse=True)
                     jnames = [JOINT_DISPLAY[j[0]] for j in sj]
@@ -878,31 +1160,22 @@ elif page == "Analyse My Stroke":
                         text=[f"  {'Close' if v < 0.2 else 'Needs Work' if v < 0.4 else 'Focus Area'} ({v:.3f})"
                               for v in jvals[::-1]],
                         textposition="outside",
-                        textfont=dict(size=11, color="#334155"),
+                        textfont=dict(size=11, color="#1C2B1E"),
                         hovertemplate="<b>%{y}</b><br>Deviation: %{x:.3f}<extra></extra>",
                         showlegend=False,
                     ))
                     layout2 = base_layout(title="Deviation from Expert (lower is better)", height=420)
                     layout2.update(xaxis=dict(title="DTW Distance", range=[0, max(jvals) * 1.4],
-                                   gridcolor="#E2E8F0"), margin=dict(l=130, r=20, t=55, b=45))
+                                   gridcolor="#D8DCC9"), margin=dict(l=130, r=20, t=55, b=45))
                     fig2.update_layout(**layout2)
                     st.plotly_chart(fig2, use_container_width=True)
 
                     if attn is not None:
                         st.markdown("---")
-                        st.markdown("""
-                        <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:0.25rem;
-                             padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                            Transformer Attention
-                        </div>
-                        <p style="color:#64748B; font-size:13px; margin-top:0.5rem; margin-bottom:1rem;">
-                            Which frames the Siamese Transformer focuses on when evaluating your stroke.
-                            <strong style="color:#EF4444;">Red bars</strong> are the 5 most critical frames.
-                        </p>
-                        """, unsafe_allow_html=True)
+                        st.write("**Attention weights** (dark bars = top-5 frames)")
 
                         top5 = np.argsort(attn)[-5:]
-                        bar_colors = ["#EF4444" if i in top5 else "#3B82F6" for i in range(len(attn))]
+                        bar_colors = ["#A0522D" if i in top5 else "#6B8F71" for i in range(len(attn))]
 
                         fig3 = go.Figure()
                         fig3.add_trace(go.Bar(
@@ -915,6 +1188,48 @@ elif page == "Analyse My Stroke":
                         layout3.update(xaxis=dict(title="Frame Number"), yaxis=dict(title="Attention Weight"))
                         fig3.update_layout(**layout3)
                         st.plotly_chart(fig3, use_container_width=True)
+
+                        st.write("**Stroke Phase Analysis**")
+
+                        n_f = len(attn)
+                        t1 = n_f // 3
+                        t2 = (2 * n_f) // 3
+                        prep_avg = float(np.mean(attn[:t1])) if t1 > 0 else 0.0
+                        fwd_avg = float(np.mean(attn[t1:t2])) if t2 > t1 else 0.0
+                        fol_avg = float(np.mean(attn[t2:])) if n_f > t2 else 0.0
+
+                        phase_names = ["Preparation", "Forward Swing", "Follow-through"]
+                        phase_scores = [prep_avg, fwd_avg, fol_avg]
+
+                        ranked = sorted(range(3), key=lambda i: phase_scores[i], reverse=True)
+                        severity = {ranked[0]: "#A0522D", ranked[1]: "#8B6E4E", ranked[2]: "#4A7C59"}
+                        phase_colors = [severity[i] for i in range(3)]
+
+                        max_s = max(phase_scores) if max(phase_scores) > 0 else 1.0
+                        bar_widths = [s / max_s for s in phase_scores]
+
+                        fig_ph = go.Figure()
+                        fig_ph.add_trace(go.Bar(
+                            x=bar_widths[::-1], y=phase_names[::-1],
+                            orientation="h",
+                            marker=dict(color=phase_colors[::-1], line=dict(width=0)),
+                            text=[f"  {s:.3f}" for s in phase_scores[::-1]],
+                            textposition="outside",
+                            textfont=dict(size=11, color="#1C2B1E"),
+                            hovertemplate="<b>%{y}</b><br>Avg attention: %{text}<extra></extra>",
+                            showlegend=False,
+                        ))
+                        layout_ph = base_layout(title="", height=200, showlegend=False)
+                        layout_ph.update(xaxis=dict(range=[0, 1.15], showticklabels=False,
+                                                    gridcolor="rgba(0,0,0,0)", linecolor="rgba(0,0,0,0)"),
+                                         yaxis=dict(gridcolor="rgba(0,0,0,0)", linecolor="rgba(0,0,0,0)"),
+                                         margin=dict(l=120, r=40, t=10, b=20))
+                        fig_ph.update_layout(**layout_ph)
+                        st.plotly_chart(fig_ph, use_container_width=True)
+
+                        top_phase = phase_names[ranked[0]]
+                        st.info(f"The model focused most on your {top_phase} phase, suggesting this is where your stroke differs most from expert level.")
+                        st.caption("Phase importance is derived from Transformer attention weights and indicates which part of your stroke the model weighted most heavily when assessing similarity.")
 
                         total_f = len(attn)
                         top_sorted = sorted(top5)
@@ -931,104 +1246,42 @@ elif page == "Analyse My Stroke":
                         st.info("Attention heatmap unavailable. Retrain the Siamese Transformer with the updated script.")
 
                     st.markdown("---")
-                    st.markdown("""
-                    <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
-                         padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                        Coaching Feedback
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.write("**Feedback per joint**")
 
-                    fbi = generate_feedback(pj)
+                    rf_imp = get_rf_joint_importance(mlm)
+                    fbi = generate_feedback(pj, rf_importance=rf_imp)
                     focus = [f for f in fbi if f["level"] == "poor"]
                     attn_i = [f for f in fbi if f["level"] == "moderate"]
                     good = [f for f in fbi if f["level"] == "good"]
 
-                    s1, s2, s3 = st.columns(3)
-                    with s1: st.metric("Focus Areas", len(focus))
-                    with s2: st.metric("Needs Attention", len(attn_i))
-                    with s3: st.metric("Doing Well", len(good))
-
-                    st.markdown('<div style="height:0.75rem;"></div>', unsafe_allow_html=True)
+                    st.write(f"{len(focus)} poor, {len(attn_i)} moderate, {len(good)} good")
 
                     if focus:
-                        st.markdown("""
-                        <div style="font-size:14px; font-weight:700; color:#DC2626; margin-bottom:0.5rem;
-                             display:flex; align-items:center; gap:0.5rem;">
-                            <svg width="16" height="16" fill="none" stroke="#DC2626" stroke-width="2" viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/>
-                                <line x1="12" y1="16" x2="12.01" y2="16"/>
-                            </svg>
-                            Priority Focus Areas
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown("**Poor** (high deviation)")
                         for fb in focus:
-                            with st.expander(f"{fb['body_part']}  ·  deviation {fb['distance']:.3f}"):
-                                st.markdown(f"""
-                                <div style="background:#FEF2F2; border-left:4px solid #EF4444; border-radius:0 8px 8px 0;
-                                     padding:0.75rem 1rem; font-size:14px; color:#374151; line-height:1.6;">
-                                    {fb['message']}
-                                </div>
-                                """, unsafe_allow_html=True)
+                            with st.expander(f"{fb['body_part']} — {fb['distance']:.3f}"):
+                                st.write(fb['message'])
 
                     if attn_i:
-                        st.markdown("""
-                        <div style="font-size:14px; font-weight:700; color:#D97706; margin:0.75rem 0 0.5rem;
-                             display:flex; align-items:center; gap:0.5rem;">
-                            <svg width="16" height="16" fill="none" stroke="#D97706" stroke-width="2" viewBox="0 0 24 24">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-                                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                            </svg>
-                            Needs Attention
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown("**Moderate**")
                         for fb in attn_i:
-                            with st.expander(f"{fb['body_part']}  ·  deviation {fb['distance']:.3f}"):
-                                st.markdown(f"""
-                                <div style="background:#FFFBEB; border-left:4px solid #F59E0B; border-radius:0 8px 8px 0;
-                                     padding:0.75rem 1rem; font-size:14px; color:#374151; line-height:1.6;">
-                                    {fb['message']}
-                                </div>
-                                """, unsafe_allow_html=True)
+                            with st.expander(f"{fb['body_part']} — {fb['distance']:.3f}"):
+                                st.write(fb['message'])
 
                     if good:
-                        st.markdown("""
-                        <div style="font-size:14px; font-weight:700; color:#16A34A; margin:0.75rem 0 0.5rem;
-                             display:flex; align-items:center; gap:0.5rem;">
-                            <svg width="16" height="16" fill="none" stroke="#16A34A" stroke-width="2" viewBox="0 0 24 24">
-                                <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
-                                <polyline points="22 4 12 14.01 9 11.01"/>
-                            </svg>
-                            Doing Well
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown("**OK**")
                         for fb in good:
-                            with st.expander(f"{fb['body_part']}  ·  deviation {fb['distance']:.3f}"):
-                                st.markdown(f"""
-                                <div style="background:#F0FDF4; border-left:4px solid #22C55E; border-radius:0 8px 8px 0;
-                                     padding:0.75rem 1rem; font-size:14px; color:#374151; line-height:1.6;">
-                                    {fb['message']}
-                                </div>
-                                """, unsafe_allow_html=True)
+                            with st.expander(f"{fb['body_part']} — {fb['distance']:.3f}"):
+                                st.write(fb['message'])
 
                     st.markdown("---")
-                    st.markdown("""
-                    <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:1rem;
-                         padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                        Top 3 Coaching Tips
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.write("**Worst 3 joints:**")
                     for i, fb in enumerate(fbi[:3]):
-                        level_color = "#DC2626" if fb["level"] == "poor" else "#D97706" if fb["level"] == "moderate" else "#16A34A"
-                        level_bg = "#FEF2F2" if fb["level"] == "poor" else "#FFFBEB" if fb["level"] == "moderate" else "#F0FDF4"
-                        st.markdown(f"""
-                        <div style="background:{level_bg}; border-radius:12px; padding:1rem 1.25rem;
-                             margin-bottom:0.75rem; border-left:4px solid {level_color};">
-                            <div style="font-size:13px; font-weight:700; color:{level_color}; margin-bottom:4px;">
-                                {i+1}. {fb['body_part']}
-                            </div>
-                            <div style="font-size:13px; color:#374151; line-height:1.6;">{fb['message']}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        tag = "poor" if fb["level"] == "poor" else "moderate" if fb["level"] == "moderate" else "ok"
+                        st.write(f"{i+1}. {fb['body_part']} ({tag}) — {fb['message']}")
+
+                    if rf_imp:
+                        st.caption("Feedback priorities are weighted by both joint deviation and biomechanical importance learned from expert-beginner classification.")
 
         try:
             os.unlink(tmp_path)
@@ -1041,14 +1294,8 @@ elif page == "Analyse My Stroke":
 
 
 elif page == "DTW Analysis":
-    st.markdown("""
-    <div style="margin-bottom: 1.5rem;">
-        <h1 style="font-size: 2rem; font-weight: 800; color: #0F172A; margin: 0;">DTW Analysis</h1>
-        <p style="color: #64748B; font-size: 0.95rem; margin-top: 6px; margin-bottom: 0;">
-            Dynamic Time Warping similarity scores across the expert video dataset
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# DTW results")
+    st.write("Dynamic time warping distance per video, converted to a similarity score. Computed per-joint then averaged.")
 
     dd = load_json("dtw_comparison_results.json")
     if not dd:
@@ -1056,18 +1303,12 @@ elif page == "DTW Analysis":
     else:
         df = pd.DataFrame(dd)
 
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("Total Strokes", len(df))
-        with c2: st.metric("Mean Similarity", f"{df['similarity_score'].mean():.1f}%")
-        with c3: st.metric("Max Similarity", f"{df['similarity_score'].max():.1f}%")
-        with c4: st.metric("Min Similarity", f"{df['similarity_score'].min():.1f}%")
-
-        st.markdown('<div style="height:1rem;"></div>', unsafe_allow_html=True)
+        st.write(f"`n={len(df)}` strokes, similarity range `{df['similarity_score'].min():.1f}%` – `{df['similarity_score'].max():.1f}%`, mean `{df['similarity_score'].mean():.1f}%`")
 
         fds = sorted(df["folder"].unique())
-        box_colors = ["#1E40AF", "#3B82F6", "#F59E0B", "#22C55E"]
-        box_fill_colors = ["rgba(30,64,175,0.15)", "rgba(59,130,246,0.15)",
-                           "rgba(245,158,11,0.15)", "rgba(34,197,94,0.15)"]
+        box_colors = ["#4A7C59", "#6B8F71", "#8B6E4E", "#5A6B55"]
+        box_fill_colors = ["rgba(74,124,89,0.15)", "rgba(107,143,113,0.15)",
+                           "rgba(139,110,78,0.15)", "rgba(90,107,85,0.15)"]
 
         fig = go.Figure()
         for i, fd in enumerate(fds):
@@ -1087,12 +1328,7 @@ elif page == "DTW Analysis":
         fig.update_layout(**layout)
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("""
-        <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:0.75rem 0 1rem;
-             padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-            Average Deviation per Body Part
-        </div>
-        """, unsafe_allow_html=True)
+        st.write("**Mean deviation per joint**")
 
         ja = {j: np.mean([r["per_joint_distances"][j] for r in dd]) for j in JOINT_NAMES}
         sj = sorted(ja.items(), key=lambda x: x[1], reverse=True)
@@ -1107,7 +1343,7 @@ elif page == "DTW Analysis":
             marker=dict(color=jcols[::-1], line=dict(width=0)),
             text=[f"  {v:.3f}" for v in jvals[::-1]],
             textposition="outside",
-            textfont=dict(size=11, color="#334155"),
+            textfont=dict(size=11, color="#1C2B1E"),
             hovertemplate="<b>%{y}</b><br>Avg DTW Distance: %{x:.3f}<extra></extra>",
             showlegend=False,
         ))
@@ -1119,14 +1355,10 @@ elif page == "DTW Analysis":
 
 
 elif page == "ML Classification":
-    st.markdown("""
-    <div style="margin-bottom: 1.5rem;">
-        <h1 style="font-size: 2rem; font-weight: 800; color: #0F172A; margin: 0;">ML Classification</h1>
-        <p style="color: #64748B; font-size: 0.95rem; margin-top: 6px; margin-bottom: 0;">
-            Expert vs beginner classification using engineered biomechanical features
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# ML classifiers")
+    st.write("Random Forest, SVM, KNN on engineered features. 5-fold cross-validation. Target: expert vs beginner.")
+    st.write("A soft voting ensemble and a stacking ensemble (with logistic regression meta-classifier) were evaluated to determine whether combining the three base classifiers improves on the best individual model.")
+    st.info("Hyperparameters were independently tuned for each classifier via 5-fold GridSearchCV on the training set. The held-out test set (n=83, seed=42) was used only for final evaluation.")
 
     md = load_json("ml_classification_results.json")
     fi = load_json("feature_importance.json")
@@ -1137,26 +1369,33 @@ elif page == "ML Classification":
         ms = list(md.keys())
         ac = [md[m]["cv_accuracy_mean"] for m in ms]
         ac_std = [md[m]["cv_accuracy_std"] for m in ms]
-        mc_colors = {"Random Forest": "#1E40AF", "SVM": "#3B82F6", "KNN": "#F59E0B"}
+        mc_colors = {"Random Forest": "#4A7C59", "SVM": "#6B8F71", "KNN": "#8B6E4E",
+                     "Soft Voting Ensemble": "#A0522D", "Stacking Ensemble": "#3B5A45"}
 
-        c1, c2, c3 = st.columns(3)
-        for col, name in zip([c1, c2, c3], ms):
-            with col:
-                st.metric(name, f"{md[name]['cv_accuracy_mean']:.1%}",
-                          delta=f"±{md[name]['cv_accuracy_std']:.1%} std")
+        best_idx = int(np.argmax(ac))
+        metrics_df = pd.DataFrame({
+            "Model": ms,
+            "CV Accuracy": [f"{a:.1%}" for a in ac],
+            "Std": [f"±{s:.1%}" for s in ac_std],
+            "Training Accuracy": [f"{md[m]['training_accuracy']:.1%}" for m in ms],
+        })
 
-        st.markdown('<div style="height:0.75rem;"></div>', unsafe_allow_html=True)
+        def _hl(row):
+            return ["font-weight: bold; background-color: #EEF0E8" if row.name == best_idx else "" for _ in row]
+
+        st.dataframe(metrics_df.style.apply(_hl, axis=1), use_container_width=True, hide_index=True)
+        st.caption(f"Best model by CV accuracy: **{ms[best_idx]}** ({ac[best_idx]:.1%})")
 
         fig = go.Figure()
         for m_name, m_acc, m_std in zip(ms, ac, ac_std):
             fig.add_trace(go.Bar(
                 x=[m_name], y=[m_acc],
                 name=m_name,
-                marker=dict(color=mc_colors.get(m_name, "#3B82F6"), line=dict(width=0)),
-                error_y=dict(type="data", array=[m_std], visible=True, color="#64748B"),
+                marker=dict(color=mc_colors.get(m_name, "#6B8F71"), line=dict(width=0)),
+                error_y=dict(type="data", array=[m_std], visible=True, color="#5A6B55"),
                 text=[f"{m_acc:.1%}"],
                 textposition="outside",
-                textfont=dict(size=14, family="Fira Code, monospace", color="#1E293B"),
+                textfont=dict(size=12, color="#1C2B1E"),
                 hovertemplate=f"<b>{m_name}</b><br>Accuracy: {m_acc:.1%} ± {m_std:.1%}<extra></extra>",
             ))
         layout = base_layout(title="Cross-Validation Accuracy by Model", height=360, showlegend=False)
@@ -1165,23 +1404,21 @@ elif page == "ML Classification":
         fig.update_layout(**layout)
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("""
-        <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:0.5rem 0 1rem;
-             padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-            Confusion Matrices
-        </div>
-        """, unsafe_allow_html=True)
+        st.write("**Confusion matrices**")
 
-        cm_cols = st.columns(3)
-        for col, (n, r) in zip(cm_cols, md.items()):
+        md_items = list(md.items())
+        row1 = md_items[:3]
+        row2 = md_items[3:]
+
+        def _draw_cm(col, n, r):
             with col:
-                st.markdown(f'<div style="font-size:13px; font-weight:700; color:#1E293B; text-align:center; margin-bottom:0.5rem;">{n}</div>', unsafe_allow_html=True)
+                st.write(f"**{n}**")
                 fig_cm, ax_cm = plt.subplots(figsize=(4, 3.5))
                 sns.heatmap(np.array(r["confusion_matrix"]), annot=True, fmt="d",
                             cmap="Blues", ax=ax_cm,
                             xticklabels=["Expert", "Beginner"],
                             yticklabels=["Expert", "Beginner"],
-                            linewidths=0.5, linecolor="#E2E8F0")
+                            linewidths=0.5, linecolor="#D8DCC9")
                 ax_cm.set_xlabel("Predicted", fontsize=10)
                 ax_cm.set_ylabel("Actual", fontsize=10)
                 ax_cm.tick_params(labelsize=9)
@@ -1189,13 +1426,16 @@ elif page == "ML Classification":
                 st.pyplot(fig_cm)
                 plt.close()
 
+        cm_cols1 = st.columns(3)
+        for col, (n, r) in zip(cm_cols1, row1):
+            _draw_cm(col, n, r)
+        if row2:
+            cm_cols2 = st.columns(3)
+            for col, (n, r) in zip(cm_cols2, row2):
+                _draw_cm(col, n, r)
+
         if fi:
-            st.markdown("""
-            <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:0.5rem 0 1rem;
-                 padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                Top 15 Feature Importances (Random Forest)
-            </div>
-            """, unsafe_allow_html=True)
+            st.write("**Feature importances (RF, top 15)**")
 
             t = fi[:15]
             fnames = [f["feature"].replace("_", " ").title() for f in t]
@@ -1207,12 +1447,12 @@ elif page == "ML Classification":
                 orientation="h",
                 marker=dict(
                     color=fimps[::-1],
-                    colorscale=[[0, "#BFDBFE"], [1, "#1E40AF"]],
+                    colorscale=[[0, "#D8DCC9"], [0.5, "#6B8F71"], [1, "#4A7C59"]],
                     line=dict(width=0),
                 ),
                 text=[f"  {v:.4f}" for v in fimps[::-1]],
                 textposition="outside",
-                textfont=dict(size=11, color="#334155"),
+                textfont=dict(size=11, color="#1C2B1E"),
                 hovertemplate="<b>%{y}</b><br>Importance: %{x:.4f}<extra></extra>",
                 showlegend=False,
             ))
@@ -1223,14 +1463,8 @@ elif page == "ML Classification":
 
 
 elif page == "Siamese Transformer":
-    st.markdown("""
-    <div style="margin-bottom: 1.5rem;">
-        <h1 style="font-size: 2rem; font-weight: 800; color: #0F172A; margin: 0;">Siamese Transformer</h1>
-        <p style="color: #64748B; font-size: 0.95rem; margin-top: 6px; margin-bottom: 0;">
-            Deep learning model architecture, training curves, and attention analysis
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# Siamese transformer")
+    st.write("Architecture config, training curves, and per-frame attention. Contrastive loss, margin=1.0.")
 
     sd = load_json("siamese_transformer_results.json")
     sh = load_json("siamese_training_history.json")
@@ -1240,25 +1474,10 @@ elif page == "Siamese Transformer":
         st.error("Results file not found. Run siamese_transformer.py first.")
     else:
         if mi:
-            st.markdown("""
-            <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:0.75rem;
-                 padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                Model Architecture
-            </div>
-            """, unsafe_allow_html=True)
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: st.metric("Transformer Layers", mi.get("num_layers", "N/A"))
-            with c2: st.metric("Attention Heads", mi.get("num_heads", "N/A"))
-            with c3: st.metric("Embed Dimension", mi.get("embed_dim", "N/A"))
-            with c4: st.metric("Total Parameters", f"{mi.get('total_parameters', 0):,}")
+            st.write(f"**Architecture:** {mi.get('num_layers','?')} layers, {mi.get('num_heads','?')} heads, embed dim {mi.get('embed_dim','?')}, {mi.get('total_parameters',0):,} params")
 
         if sh:
-            st.markdown("""
-            <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:1rem 0 0.75rem;
-                 padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                Training History
-            </div>
-            """, unsafe_allow_html=True)
+            st.write("**Training curves**")
 
             dh = pd.DataFrame(sh)
             tc1, tc2 = st.columns(2)
@@ -1267,12 +1486,12 @@ elif page == "Siamese Transformer":
                 fig_loss = go.Figure()
                 fig_loss.add_trace(go.Scatter(
                     x=dh["epoch"], y=dh["train_loss"], name="Train Loss",
-                    line=dict(color="#1E40AF", width=2.5),
+                    line=dict(color="#4A7C59", width=2.5),
                     hovertemplate="Epoch %{x}<br>Train Loss: %{y:.4f}<extra></extra>",
                 ))
                 fig_loss.add_trace(go.Scatter(
                     x=dh["epoch"], y=dh["val_loss"], name="Val Loss",
-                    line=dict(color="#EF4444", width=2.5, dash="dash"),
+                    line=dict(color="#A0522D", width=2.5, dash="dash"),
                     hovertemplate="Epoch %{x}<br>Val Loss: %{y:.4f}<extra></extra>",
                 ))
                 layout_loss = base_layout(title="Training & Validation Loss", height=320)
@@ -1284,7 +1503,7 @@ elif page == "Siamese Transformer":
                 fig_acc = go.Figure()
                 fig_acc.add_trace(go.Scatter(
                     x=dh["epoch"], y=dh["val_accuracy"], name="Val Accuracy",
-                    line=dict(color="#22C55E", width=2.5),
+                    line=dict(color="#4A7C59", width=2.5),
                     fill="tozeroy",
                     fillcolor="rgba(34, 197, 94, 0.08)",
                     hovertemplate="Epoch %{x}<br>Accuracy: %{y:.1%}<extra></extra>",
@@ -1297,12 +1516,7 @@ elif page == "Siamese Transformer":
 
         entries = [r for r in sd if "attention_weights" in r]
         if entries:
-            st.markdown("""
-            <div style="font-size:1rem; font-weight:700; color:#1E293B; margin:0.5rem 0 0.75rem;
-                 padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                Attention Viewer
-            </div>
-            """, unsafe_allow_html=True)
+            st.write("**Per-stroke attention**")
 
             opts = [f"{r['video']} ({r['folder']})" for r in entries[:20]]
             sel = st.selectbox("Select a stroke to inspect:", opts)
@@ -1311,7 +1525,7 @@ elif page == "Siamese Transformer":
                 a = np.array(e["attention_weights"])
                 top_frames = e.get("top_attention_frames", [])
 
-                bar_cols = ["#EF4444" if i in top_frames else "#3B82F6" for i in range(len(a))]
+                bar_cols = ["#A0522D" if i in top_frames else "#6B8F71" for i in range(len(a))]
 
                 fig_attn = go.Figure()
                 fig_attn.add_trace(go.Bar(
@@ -1327,85 +1541,182 @@ elif page == "Siamese Transformer":
 
 
 elif page == "Method Comparison":
-    st.markdown("""
-    <div style="margin-bottom: 1.5rem;">
-        <h1 style="font-size: 2rem; font-weight: 800; color: #0F172A; margin: 0;">Method Comparison</h1>
-        <p style="color: #64748B; font-size: 0.95rem; margin-top: 6px; margin-bottom: 0;">
-            Head-to-head comparison of DTW and Siamese Transformer similarity scores
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# DTW vs siamese — full dataset")
+    st.write("All 330 recordings. DTW thresholded at sim > 50%. Siamese thresholded at distance < 0.5.")
 
-    dd = load_json("dtw_comparison_results.json")
-    sd = load_json("siamese_transformer_results.json")
-
-    if not dd or not sd:
-        st.error("One or both results files not found.")
+    df = method_comparison_eval()
+    if df is None:
+        st.error("No preprocessed data found.")
     else:
-        fds = sorted(set(r["folder"] for r in dd))
-        dv = [np.mean([r["similarity_score"] for r in dd if r["folder"] == f]) for f in fds]
-        sv = [np.mean([r["siamese_similarity"] for r in sd if r["folder"] == f]) for f in fds]
-        labels = [f.replace("_tennis_", " / ").replace("_", " ").title() for f in fds]
+        EXPERT_COLOR = "#4A7C59"
+        BEGINNER_COLOR = "#8B6E4E"
+        THRESH_COLOR = "#A0522D"
+        LABELS = ["expert", "beginner"]
 
-        c1, c2 = st.columns(2)
-        with c1: st.metric("Avg DTW Similarity (all)", f"{np.mean(dv):.1f}%")
-        with c2: st.metric("Avg Siamese Similarity (all)", f"{np.mean(sv):.1f}%")
+        def _metrics(y, yhat):
+            return {
+                "accuracy": accuracy_score(y, yhat),
+                "precision": precision_score(y, yhat, pos_label="expert", zero_division=0),
+                "recall": recall_score(y, yhat, pos_label="expert", zero_division=0),
+                "f1": f1_score(y, yhat, pos_label="expert", zero_division=0),
+            }
 
-        st.markdown('<div style="height:0.75rem;"></div>', unsafe_allow_html=True)
+        st.caption(f"n = {len(df)} — experts: {(df['label']=='expert').sum()}, beginners: {(df['label']=='beginner').sum()}")
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            name="DTW", x=labels, y=dv,
-            marker=dict(color="#1E40AF", line=dict(width=0)),
-            text=[f"{v:.1f}%" for v in dv], textposition="outside",
-            textfont=dict(size=11, color="#1E293B"),
-            hovertemplate="<b>DTW</b> — %{x}<br>Similarity: %{y:.1f}%<extra></extra>",
-        ))
-        fig.add_trace(go.Bar(
-            name="Siamese Transformer", x=labels, y=sv,
-            marker=dict(color="#F59E0B", line=dict(width=0)),
-            text=[f"{v:.1f}%" for v in sv], textposition="outside",
-            textfont=dict(size=11, color="#1E293B"),
-            hovertemplate="<b>Siamese</b> — %{x}<br>Similarity: %{y:.1f}%<extra></extra>",
-        ))
-        layout = base_layout(title="DTW vs Siamese Transformer — Average Similarity by Stroke Category", height=420)
-        layout.update(barmode="group", bargap=0.25, bargroupgap=0.08,
-                      yaxis=dict(title="Similarity (%)", ticksuffix="%", range=[0, max(max(dv), max(sv)) * 1.2]),
-                      xaxis=dict(title=""))
-        fig.update_layout(**layout)
-        st.plotly_chart(fig, use_container_width=True)
+        st.write("### Confusion matrices")
+        fig_cm, axs = plt.subplots(1, 2, figsize=(9, 3.6))
+        for ax, method, pred_col in [(axs[0], "DTW", "dtw_pred"), (axs[1], "Siamese", "siam_pred")]:
+            cm = confusion_matrix(df["label"], df[pred_col], labels=LABELS)
+            tp, fn = cm[0, 0], cm[0, 1]
+            fp, tn = cm[1, 0], cm[1, 1]
+            annot = np.array([[f"TP\n{tp}", f"FN\n{fn}"], [f"FP\n{fp}", f"TN\n{tn}"]])
+            sns.heatmap(cm, annot=annot, fmt="", cmap="Greens", ax=ax,
+                        xticklabels=LABELS, yticklabels=LABELS,
+                        cbar=False, linewidths=0.5, linecolor="#D8DCC9",
+                        annot_kws={"fontsize": 11})
+            ax.set_title(method, fontsize=11)
+            ax.set_xlabel("predicted", fontsize=10)
+            ax.set_ylabel("actual", fontsize=10)
+            ax.tick_params(labelsize=9)
+        plt.tight_layout()
+        st.pyplot(fig_cm)
+        plt.close(fig_cm)
 
-        all_dd = {r["video"]: r["similarity_score"] for r in dd}
-        all_sd = {r["video"]: r["siamese_similarity"] for r in sd}
-        common = set(all_dd.keys()) & set(all_sd.keys())
+        st.write("### Classification metrics")
+        r_pear, p_pear = pearsonr(df["dtw_sim"], df["siam_dist"])
+        met_df = pd.DataFrame([
+            {"method": "DTW", **_metrics(df["label"], df["dtw_pred"])},
+            {"method": "Siamese", **_metrics(df["label"], df["siam_pred"])},
+        ])
+        num = ["accuracy", "precision", "recall", "f1"]
 
-        if common:
-            xs = [all_dd[v] for v in common]
-            ys = [all_sd[v] for v in common]
+        def _best(col):
+            m = col.max()
+            return ['background-color: #D8E3CE; font-weight: 600' if v == m else '' for v in col]
 
-            fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(
-                x=xs, y=ys, mode="markers",
-                marker=dict(color="#3B82F6", size=7, opacity=0.65, line=dict(color="white", width=0.5)),
-                hovertemplate="DTW: %{x:.1f}%<br>Siamese: %{y:.1f}%<extra></extra>",
-                showlegend=False,
-            ))
-            layout2 = base_layout(title="DTW vs Siamese Similarity — Per-Stroke Correlation", height=360)
-            layout2.update(xaxis=dict(title="DTW Similarity (%)", ticksuffix="%"),
-                           yaxis=dict(title="Siamese Similarity (%)", ticksuffix="%"))
-            fig2.update_layout(**layout2)
-            st.plotly_chart(fig2, use_container_width=True)
+        st.dataframe(
+            met_df.style.apply(_best, subset=num).format({c: "{:.3f}" for c in num}),
+            use_container_width=True, hide_index=True)
+        st.caption(f"Pearson r(DTW_sim, Siamese_dist) = {r_pear:.3f}, p = {p_pear:.3g}")
+
+        st.write("### Score distributions")
+        fig_d, axs = plt.subplots(1, 2, figsize=(10, 3.5))
+        for lbl, c in [("expert", EXPERT_COLOR), ("beginner", BEGINNER_COLOR)]:
+            sub = df[df["label"] == lbl]
+            axs[0].hist(sub["dtw_sim"], bins=20, alpha=0.6, label=lbl, color=c, edgecolor="none")
+            axs[1].hist(sub["siam_dist"], bins=20, alpha=0.6, label=lbl, color=c, edgecolor="none")
+        axs[0].axvline(50, color=THRESH_COLOR, linestyle="--", linewidth=1, label="threshold")
+        axs[1].axvline(0.5, color=THRESH_COLOR, linestyle="--", linewidth=1, label="threshold")
+        axs[0].set_title("DTW similarity", fontsize=11)
+        axs[0].set_xlabel("similarity (%)", fontsize=10); axs[0].set_ylabel("count", fontsize=10)
+        axs[0].legend(fontsize=9, frameon=False)
+        axs[1].set_title("Siamese distance", fontsize=11)
+        axs[1].set_xlabel("distance", fontsize=10); axs[1].set_ylabel("count", fontsize=10)
+        axs[1].legend(fontsize=9, frameon=False)
+        for ax in axs:
+            ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+            ax.tick_params(labelsize=9)
+        plt.tight_layout()
+        st.pyplot(fig_d); plt.close(fig_d)
+
+        st.write("### Scatter plot")
+        fig_s, ax = plt.subplots(figsize=(7, 4.5))
+        for lbl, c in [("expert", EXPERT_COLOR), ("beginner", BEGINNER_COLOR)]:
+            sub = df[df["label"] == lbl]
+            ax.scatter(sub["dtw_sim"], sub["siam_dist"], alpha=0.65, c=c, label=lbl, s=28, edgecolors="none")
+        ax.axvline(50, color=THRESH_COLOR, linestyle="--", linewidth=1, alpha=0.7)
+        ax.axhline(0.5, color=THRESH_COLOR, linestyle="--", linewidth=1, alpha=0.7)
+        ax.set_xlabel("DTW similarity (%)", fontsize=10)
+        ax.set_ylabel("Siamese distance", fontsize=10)
+        ax.set_title(f"Pearson r = {r_pear:.3f}, p = {p_pear:.3g}", fontsize=11)
+        ax.legend(fontsize=9, frameon=False)
+        ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+        ax.tick_params(labelsize=9)
+        plt.tight_layout()
+        st.pyplot(fig_s); plt.close(fig_s)
+
+        st.write("### Pearson correlation")
+        st.write(f"Pearson's r between DTW similarity and Siamese distance across all {len(df)} recordings: **r = `{r_pear:.3f}`**, p-value = `{p_pear:.3g}`.")
+        st.caption("Negative r is expected — higher DTW similarity should correspond to lower Siamese distance.")
+
+        st.write("### ROC curves")
+        y_bin = (df["label"] == "expert").astype(int).values
+        dtw_scores = df["dtw_sim"].values
+        siam_scores = -df["siam_dist"].values
+        fpr_d, tpr_d, _ = roc_curve(y_bin, dtw_scores)
+        fpr_s, tpr_s, _ = roc_curve(y_bin, siam_scores)
+        auc_d, auc_s = auc(fpr_d, tpr_d), auc(fpr_s, tpr_s)
+
+        fig_r, ax = plt.subplots(figsize=(5.5, 4.5))
+        ax.plot(fpr_d, tpr_d, color=EXPERT_COLOR, linewidth=2, label=f"DTW (AUC = {auc_d:.3f})")
+        ax.plot(fpr_s, tpr_s, color="#6B8F71", linewidth=2, label=f"Siamese (AUC = {auc_s:.3f})")
+        ax.plot([0, 1], [0, 1], color=THRESH_COLOR, linestyle="--", linewidth=1, alpha=0.6, label="chance")
+        ax.set_xlabel("false positive rate", fontsize=10)
+        ax.set_ylabel("true positive rate", fontsize=10)
+        ax.legend(fontsize=9, frameon=False, loc="lower right")
+        ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+        ax.tick_params(labelsize=9)
+        plt.tight_layout()
+        st.pyplot(fig_r); plt.close(fig_r)
+
+        st.write("### Per stroke type breakdown")
+        per_rows = []
+        for stroke in ["forehand", "backhand"]:
+            sub = df[df["stroke"] == stroke]
+            agree = (sub["dtw_pred"] == sub["siam_pred"]).mean()
+            for method, pred in [("DTW", "dtw_pred"), ("Siamese", "siam_pred")]:
+                m = _metrics(sub["label"], sub[pred])
+                per_rows.append({"stroke": stroke, "method": method, "n": len(sub),
+                                 **m, "agreement": agree})
+        per_df = pd.DataFrame(per_rows)
+        st.dataframe(
+            per_df.style.format({"accuracy": "{:.3f}", "precision": "{:.3f}",
+                                 "recall": "{:.3f}", "f1": "{:.3f}", "agreement": "{:.1%}"}),
+            use_container_width=True, hide_index=True)
+
+        fh_agree = (df[df['stroke']=='forehand']['dtw_pred'] == df[df['stroke']=='forehand']['siam_pred']).mean()
+        bh_agree = (df[df['stroke']=='backhand']['dtw_pred'] == df[df['stroke']=='backhand']['siam_pred']).mean()
+        if fh_agree > bh_agree:
+            st.write(f"DTW and Siamese agree more on **forehand** ({fh_agree:.1%}) than backhand ({bh_agree:.1%}).")
+        elif bh_agree > fh_agree:
+            st.write(f"DTW and Siamese agree more on **backhand** ({bh_agree:.1%}) than forehand ({fh_agree:.1%}).")
+        else:
+            st.write(f"DTW and Siamese agree equally on both ({fh_agree:.1%}).")
+
+        st.write("### Agreement analysis")
+        both_e = df[(df["dtw_pred"] == "expert") & (df["siam_pred"] == "expert")]
+        both_b = df[(df["dtw_pred"] == "beginner") & (df["siam_pred"] == "beginner")]
+        dtw_only = df[(df["dtw_pred"] == "expert") & (df["siam_pred"] == "beginner")]
+        siam_only = df[(df["dtw_pred"] == "beginner") & (df["siam_pred"] == "expert")]
+
+        ag = pd.DataFrame(
+            [[len(both_e), len(siam_only)], [len(dtw_only), len(both_b)]],
+            index=["Siamese: expert", "Siamese: beginner"],
+            columns=["DTW: expert", "DTW: beginner"],
+        )
+        st.dataframe(ag, use_container_width=True)
+        total = len(df)
+        agree_n = len(both_e) + len(both_b)
+        st.write(f"Overall agreement: `{agree_n/total:.1%}` ({agree_n}/{total}). Disagreements: `{len(dtw_only) + len(siam_only)}`.")
+
+        if len(dtw_only):
+            st.write(f"**DTW says expert, Siamese says beginner** — {len(dtw_only)} recordings")
+            st.dataframe(
+                dtw_only[["video", "label", "dtw_sim", "siam_dist"]].reset_index().rename(columns={"index": "idx"}),
+                use_container_width=True, hide_index=True)
+
+        if len(siam_only):
+            st.write(f"**DTW says beginner, Siamese says expert** — {len(siam_only)} recordings")
+            st.dataframe(
+                siam_only[["video", "label", "dtw_sim", "siam_dist"]].reset_index().rename(columns={"index": "idx"}),
+                use_container_width=True, hide_index=True)
+
+        st.caption("Full per-recording scores saved to results/method_comparison_full.csv")
 
 
 elif page == "Individual Stroke":
-    st.markdown("""
-    <div style="margin-bottom: 1.5rem;">
-        <h1 style="font-size: 2rem; font-weight: 800; color: #0F172A; margin: 0;">Individual Stroke</h1>
-        <p style="color: #64748B; font-size: 0.95rem; margin-top: 6px; margin-bottom: 0;">
-            Drill down into any individual stroke from the dataset
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("# Individual stroke")
+    st.write("Pick one stroke and see its joint-level scores + feedback.")
 
     dd = load_json("dtw_comparison_results.json")
     sd = load_json("siamese_transformer_results.json")
@@ -1420,51 +1731,23 @@ elif page == "Individual Stroke":
             if e:
                 se = next((r for r in sd if r["video"] == sel), None) if sd else None
 
-                info_col, score_col = st.columns([1, 2])
-                with info_col:
-                    st.markdown(f"""
-                    <div style="background:white; border-radius:14px; padding:1.25rem; border:1px solid #E2E8F0;
-                         box-shadow:0 1px 3px rgba(0,0,0,0.07);">
-                        <div style="font-size:11px; font-weight:700; color:#64748B; text-transform:uppercase;
-                             letter-spacing:0.8px; margin-bottom:0.5rem;">Stroke Info</div>
-                        <div style="font-size:15px; font-weight:700; color:#1E293B; margin-bottom:4px;">
-                            {get_stroke_type(e['folder'])}
-                        </div>
-                        <div style="font-size:13px; color:#64748B;">{get_ball_type(e['folder'])}</div>
-                        <div style="font-size:12px; color:#94A3B8; margin-top:6px; font-family:'Fira Code',monospace;">
-                            {sel}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                with score_col:
-                    sc1, sc2 = st.columns(2)
-                    with sc1:
-                        dtw_score = e["similarity_score"]
-                        st.metric("DTW Similarity", f"{dtw_score}%")
-                    with sc2:
-                        if se:
-                            siam_score = se["siamese_similarity"]
-                            st.metric("Siamese Similarity", f"{siam_score}%")
-                        else:
-                            st.metric("Siamese Similarity", "N/A")
-
-                st.markdown('<div style="height:0.75rem;"></div>', unsafe_allow_html=True)
+                st.write(f"**{get_stroke_type(e['folder'])}** / {get_ball_type(e['folder'])} — `{sel}`")
+                dtw_score = e["similarity_score"]
+                sim = f"DTW: `{dtw_score}%`"
+                if se:
+                    sim += f", Siamese: `{se['siamese_similarity']}%`"
+                st.write(sim)
 
                 if "per_joint_distances" in e:
                     pj = e["per_joint_distances"]
-                    fb = generate_feedback(pj)
+                    rf_imp = get_rf_joint_importance(train_ml())
+                    fb = generate_feedback(pj, rf_importance=rf_imp)
                     sj = sorted(pj.items(), key=lambda x: x[1], reverse=True)
                     jnames = [JOINT_DISPLAY[j[0]] for j in sj]
                     jvals = [j[1] for j in sj]
                     jcols = [dist_color(v) for v in jvals]
 
-                    st.markdown("""
-                    <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:0.75rem;
-                         padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                        Body Part Deviation
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.write("**Per-joint deviation**")
 
                     fig = go.Figure()
                     fig.add_trace(go.Bar(
@@ -1474,7 +1757,7 @@ elif page == "Individual Stroke":
                         text=[f"  {'Close' if v < 0.2 else 'Work' if v < 0.4 else 'Focus'} ({v:.3f})"
                               for v in jvals[::-1]],
                         textposition="outside",
-                        textfont=dict(size=11, color="#334155"),
+                        textfont=dict(size=11, color="#1C2B1E"),
                         hovertemplate="<b>%{y}</b><br>Deviation: %{x:.3f}<extra></extra>",
                         showlegend=False,
                     ))
@@ -1484,36 +1767,15 @@ elif page == "Individual Stroke":
                     fig.update_layout(**layout)
                     st.plotly_chart(fig, use_container_width=True)
 
-                    st.markdown("""
-                    <div style="font-size:1rem; font-weight:700; color:#1E293B; margin-bottom:0.75rem;
-                         padding-bottom:0.5rem; border-bottom:2px solid #1E40AF; display:inline-block;">
-                        Coaching Feedback
-                    </div>
-                    """, unsafe_allow_html=True)
-
+                    st.write("**Feedback**")
                     for f in [f for f in fb if f["level"] == "poor"]:
-                        with st.expander(f"Priority — {f['body_part']}  ·  {f['distance']:.3f}"):
-                            st.markdown(f"""
-                            <div style="background:#FEF2F2; border-left:4px solid #EF4444; border-radius:0 8px 8px 0;
-                                 padding:0.75rem 1rem; font-size:14px; color:#374151; line-height:1.6;">
-                                {f['message']}
-                            </div>
-                            """, unsafe_allow_html=True)
-
+                        with st.expander(f"poor — {f['body_part']} ({f['distance']:.3f})"):
+                            st.write(f['message'])
                     for f in [f for f in fb if f["level"] == "moderate"]:
-                        with st.expander(f"Attention — {f['body_part']}  ·  {f['distance']:.3f}"):
-                            st.markdown(f"""
-                            <div style="background:#FFFBEB; border-left:4px solid #F59E0B; border-radius:0 8px 8px 0;
-                                 padding:0.75rem 1rem; font-size:14px; color:#374151; line-height:1.6;">
-                                {f['message']}
-                            </div>
-                            """, unsafe_allow_html=True)
-
+                        with st.expander(f"moderate — {f['body_part']} ({f['distance']:.3f})"):
+                            st.write(f['message'])
                     for f in [f for f in fb if f["level"] == "good"]:
-                        with st.expander(f"Good — {f['body_part']}  ·  {f['distance']:.3f}"):
-                            st.markdown(f"""
-                            <div style="background:#F0FDF4; border-left:4px solid #22C55E; border-radius:0 8px 8px 0;
-                                 padding:0.75rem 1rem; font-size:14px; color:#374151; line-height:1.6;">
-                                {f['message']}
-                            </div>
-                            """, unsafe_allow_html=True)
+                        with st.expander(f"ok — {f['body_part']} ({f['distance']:.3f})"):
+                            st.write(f['message'])
+                    if rf_imp:
+                        st.caption("Feedback priorities are weighted by both joint deviation and biomechanical importance learned from expert-beginner classification.")

@@ -64,5 +64,49 @@
         186
       ]
     ]
+  },
+  "Soft Voting Ensemble": {
+    "cv_accuracy_mean": 0.9394,
+    "cv_accuracy_std": 0.0254,
+    "cv_scores": [
+      0.9697,
+      0.9545,
+      0.9091,
+      0.9545,
+      0.9091
+    ],
+    "training_accuracy": 1.0,
+    "confusion_matrix": [
+      [
+        144,
+        0
+      ],
+      [
+        0,
+        186
+      ]
+    ]
+  },
+  "Stacking Ensemble": {
+    "cv_accuracy_mean": 0.9394,
+    "cv_accuracy_std": 0.0318,
+    "cv_scores": [
+      0.9697,
+      0.9697,
+      0.8939,
+      0.9545,
+      0.9091
+    ],
+    "training_accuracy": 0.997,
+    "confusion_matrix": [
+      [
+        144,
+        0
+      ],
+      [
+        1,
+        185
+      ]
+    ]
   }
 }

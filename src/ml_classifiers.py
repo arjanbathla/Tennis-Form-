@@ -8,10 +8,11 @@ import numpy as np
 import json
 import csv
 from pathlib import Path
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier, StackingClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score, StratifiedKFold, GridSearchCV, train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.pipeline import Pipeline
@@ -169,70 +170,136 @@ def main():
     X = np.nan_to_num(np.array(all_features), nan=0.0, posinf=0.0, neginf=0.0)
     y = np.array(all_labels)
 
-    print(f"\nTraining data: {X.shape}, expert={np.sum(y == 'expert')}, beginner={np.sum(y == 'beginner')}")
+    # 75/25 stratified split, seed=42 — same as unified_evaluation in app.py
+    idx_tr, idx_te = train_test_split(list(range(len(X))), test_size=0.25,
+                                       stratify=y, random_state=42)
+    X_train, X_test = X[idx_tr], X[idx_te]
+    y_train, y_test = y[idx_tr], y[idx_te]
+
+    print(f"\nTotal: {X.shape[0]}, Train: {len(idx_tr)}, Test: {len(idx_te)}")
+    print(f"  expert={np.sum(y == 'expert')}, beginner={np.sum(y == 'beginner')}")
 
     print(f"\n{'=' * 50}")
-    print("CLASSIFIER EVALUATION (5-fold cross-validation)")
+    print("HYPERPARAMETER TUNING (GridSearchCV on training set)")
     print(f"{'=' * 50}")
-    
-    classifiers = {
-        "Random Forest": RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            random_state=42,
-            class_weight="balanced",
-        ),
-        "SVM": SVC(
-            kernel="rbf",
-            C=1.0,
-            gamma="scale",
-            class_weight="balanced",
-            probability=True,
-            random_state=42,
-        ),
-        "KNN": KNeighborsClassifier(
-            n_neighbors=5,
-            weights="distance",
-            metric="euclidean",
-        ),
+
+    param_grids = {
+        "Random Forest": {
+            "classifier__n_estimators": [50, 100, 200],
+            "classifier__max_depth": [5, 10, 20, None],
+            "classifier__min_samples_leaf": [1, 2, 4],
+            "classifier__min_samples_split": [2, 5, 10],
+            "classifier__class_weight": ["balanced"],
+        },
+        "SVM": {
+            "classifier__C": [0.1, 1.0, 10.0],
+            "classifier__kernel": ["rbf", "linear"],
+            "classifier__gamma": ["scale", "auto"],
+            "classifier__class_weight": ["balanced"],
+        },
+        "KNN": {
+            "classifier__n_neighbors": [3, 5, 7, 9],
+            "classifier__weights": ["uniform", "distance"],
+            "classifier__metric": ["euclidean", "manhattan"],
+        },
     }
-    
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    base_clfs = {
+        "Random Forest": RandomForestClassifier(random_state=42),
+        "SVM": SVC(probability=True, random_state=42),
+        # algorithm='ball_tree' avoids the sklearn ArgKminClassMode fast path,
+        # which crashes on string labels in sklearn >=1.5.
+        "KNN": KNeighborsClassifier(algorithm="ball_tree"),
+    }
+
     results_summary = {}
     trained_models = {}
-    
-    for name, clf in classifiers.items():
+
+    for name, clf in base_clfs.items():
         print(f"\n--- {name} ---")
 
         pipeline = Pipeline([("scaler", StandardScaler()), ("classifier", clf)])
-        scores = cross_val_score(pipeline, X, y, cv=cv, scoring="accuracy")
-        print(f"  CV accuracy: {scores.mean():.3f} (+/- {scores.std():.3f})")
-        print(f"  Per-fold: {[f'{s:.3f}' for s in scores]}")
+        gs = GridSearchCV(pipeline, param_grids[name], cv=5, scoring="accuracy", n_jobs=-1)
+        gs.fit(X_train, y_train)
 
-        pipeline.fit(X, y)
-        trained_models[name] = pipeline
+        best_pipe = gs.best_estimator_
+        trained_models[name] = best_pipe
+        print(f"  Best params: {gs.best_params_}")
+        print(f"  GridSearchCV best CV accuracy: {gs.best_score_:.3f}")
 
-        y_pred = pipeline.predict(X)
-        report = classification_report(y, y_pred, output_dict=True)
-        print(f"  Training accuracy: {report['accuracy']:.3f}")
-        print(f"  Expert p/r: {report['expert']['precision']:.3f} / {report['expert']['recall']:.3f}")
-        print(f"  Beginner p/r: {report['beginner']['precision']:.3f} / {report['beginner']['recall']:.3f}")
+        y_pred_train = best_pipe.predict(X_train)
+        y_pred_test = best_pipe.predict(X_test)
+        report_train = classification_report(y_train, y_pred_train, output_dict=True)
+        report_test = classification_report(y_test, y_pred_test, output_dict=True)
+        print(f"  Training accuracy: {report_train['accuracy']:.3f}")
+        print(f"  Test accuracy: {report_test['accuracy']:.3f}")
+        print(f"  Test Expert p/r: {report_test['expert']['precision']:.3f} / {report_test['expert']['recall']:.3f}")
+        print(f"  Test Beginner p/r: {report_test['beginner']['precision']:.3f} / {report_test['beginner']['recall']:.3f}")
 
-        cm = confusion_matrix(y, y_pred, labels=["expert", "beginner"])
-        print(f"  Confusion matrix:")
+        cm = confusion_matrix(y_test, y_pred_test, labels=["expert", "beginner"])
+        print(f"  Test confusion matrix:")
         print(f"                 Predicted")
         print(f"                 Expert  Beginner")
         print(f"    Actual Expert   {cm[0][0]:>4}    {cm[0][1]:>4}")
         print(f"    Actual Beginner {cm[1][0]:>4}    {cm[1][1]:>4}")
-        
+
+        results_summary[name] = {
+            "cv_accuracy_mean": round(float(gs.best_score_), 4),
+            "cv_accuracy_std": round(float(gs.cv_results_["std_test_score"][gs.best_index_]), 4),
+            "cv_scores": [round(float(gs.best_score_), 4)],
+            "training_accuracy": round(float(report_train["accuracy"]), 4),
+            "confusion_matrix": cm.tolist(),
+            "best_params": {k: str(v) for k, v in gs.best_params_.items()},
+        }
+
+    base_estimators = [
+        ("rf", trained_models["Random Forest"]),
+        ("svm", trained_models["SVM"]),
+        ("knn", trained_models["KNN"]),
+    ]
+
+    ensembles = {
+        "Soft Voting Ensemble": VotingClassifier(estimators=base_estimators, voting="soft"),
+        "Stacking Ensemble": StackingClassifier(
+            estimators=base_estimators,
+            final_estimator=LogisticRegression(max_iter=1000, random_state=42),
+            cv=5,
+        ),
+    }
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    for name, ens in ensembles.items():
+        print(f"\n--- {name} ---")
+        scores = cross_val_score(ens, X_train, y_train, cv=cv, scoring="accuracy")
+        print(f"  CV accuracy: {scores.mean():.3f} (+/- {scores.std():.3f})")
+
+        ens.fit(X_train, y_train)
+        trained_models[name] = ens
+
+        y_pred_train = ens.predict(X_train)
+        y_pred_test = ens.predict(X_test)
+        report_train = classification_report(y_train, y_pred_train, output_dict=True)
+        report_test = classification_report(y_test, y_pred_test, output_dict=True)
+        print(f"  Training accuracy: {report_train['accuracy']:.3f}")
+        print(f"  Test accuracy: {report_test['accuracy']:.3f}")
+        print(f"  Test Expert p/r: {report_test['expert']['precision']:.3f} / {report_test['expert']['recall']:.3f}")
+        print(f"  Test Beginner p/r: {report_test['beginner']['precision']:.3f} / {report_test['beginner']['recall']:.3f}")
+
+        cm = confusion_matrix(y_test, y_pred_test, labels=["expert", "beginner"])
+        print(f"  Test confusion matrix:")
+        print(f"                 Predicted")
+        print(f"                 Expert  Beginner")
+        print(f"    Actual Expert   {cm[0][0]:>4}    {cm[0][1]:>4}")
+        print(f"    Actual Beginner {cm[1][0]:>4}    {cm[1][1]:>4}")
+
         results_summary[name] = {
             "cv_accuracy_mean": round(float(scores.mean()), 4),
             "cv_accuracy_std": round(float(scores.std()), 4),
             "cv_scores": [round(float(s), 4) for s in scores],
-            "training_accuracy": round(float(report["accuracy"]), 4),
+            "training_accuracy": round(float(report_train["accuracy"]), 4),
             "confusion_matrix": cm.tolist(),
         }
-    
+
     print(f"\n{'=' * 50}")
     print("TOP 15 MOST IMPORTANT FEATURES (Random Forest)")
     print(f"{'=' * 50}")

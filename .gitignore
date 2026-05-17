@@ -14,9 +14,3 @@ models/
 __pycache__/
 *.pyc
 .DS_Store
-
-# Results (optional - include if you want)
-# results/
-
-# Claude Code
-.claude/

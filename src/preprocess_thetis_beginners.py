@@ -1,10 +1,9 @@
 """
-Preprocess THETIS beginner keypoints — same pipeline as
-expert/personal data (hip-centre, torso-scale, smooth).
+Same pipeline as preprocess_keypoints.py, for THETIS beginners.
+Kept separate because the folder layout differs.
 """
 
 import numpy as np
-import json
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -17,69 +16,59 @@ LEFT_SHOULDER, RIGHT_SHOULDER = 11, 12
 SMOOTHING_WINDOW = 3
 
 
-def preprocess(keypoints):
-    frame_sums = np.sum(np.abs(keypoints), axis=(1, 2))
-    keypoints = keypoints[frame_sums > 0]
-    if len(keypoints) < 5:
+def preprocess(kp):
+    kp = kp[np.sum(np.abs(kp), axis=(1, 2)) > 0]
+    if len(kp) < 5:
         return None
 
-    hip_mid = (keypoints[:, LEFT_HIP, :] + keypoints[:, RIGHT_HIP, :]) / 2.0
-    keypoints = keypoints - hip_mid[:, np.newaxis, :]
+    hip = (kp[:, LEFT_HIP, :] + kp[:, RIGHT_HIP, :]) / 2.0
+    kp = kp - hip[:, np.newaxis, :]
 
-    shoulder_mid = (keypoints[:, LEFT_SHOULDER, :] + keypoints[:, RIGHT_SHOULDER, :]) / 2.0
-    hip_mid2 = (keypoints[:, LEFT_HIP, :] + keypoints[:, RIGHT_HIP, :]) / 2.0
-    torso = np.mean(np.linalg.norm(shoulder_mid - hip_mid2, axis=1))
+    sh = (kp[:, LEFT_SHOULDER, :] + kp[:, RIGHT_SHOULDER, :]) / 2.0
+    hp = (kp[:, LEFT_HIP, :] + kp[:, RIGHT_HIP, :]) / 2.0
+    torso = np.mean(np.linalg.norm(sh - hp, axis=1))
     if torso < 0.01:
         return None
 
-    keypoints = keypoints / torso
-    keypoints = keypoints[:, SELECTED_JOINTS, :]
+    kp = kp / torso
+    kp = kp[:, SELECTED_JOINTS, :]
 
-    smoothed = np.copy(keypoints).astype(float)
-    half = SMOOTHING_WINDOW // 2
-    for i in range(len(keypoints)):
-        start = max(0, i - half)
-        end = min(len(keypoints), i + half + 1)
-        smoothed[i] = np.mean(keypoints[start:end], axis=0)
-    
+    smoothed = np.copy(kp).astype(float)
+    h = SMOOTHING_WINDOW // 2
+    for i in range(len(kp)):
+        smoothed[i] = np.mean(kp[max(0, i - h):min(len(kp), i + h + 1)], axis=0)
     return smoothed
 
 
 def main():
-    print("=" * 60)
-    print("PREPROCESSING THETIS BEGINNERS")
-    print("=" * 60)
-    
+    print("preprocessing THETIS beginners")
     total = 0
     successful = 0
-    
+
     for folder in ["forehand", "backhand"]:
-        input_dir = PROCESSED_DIR / folder
-        output_dir = PREPROCESSED_DIR / folder
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        if not input_dir.exists():
-            print(f"  {input_dir} not found, skipping")
+        src = PROCESSED_DIR / folder
+        out = PREPROCESSED_DIR / folder
+        out.mkdir(parents=True, exist_ok=True)
+
+        if not src.exists():
+            print(f"  skip: {src}")
             continue
-        
-        npy_files = sorted([f for f in input_dir.iterdir() if f.name.endswith("_keypoints.npy")])
-        print(f"\n--- {folder} ({len(npy_files)} files) ---")
-        
-        for npy_file in npy_files:
+
+        files = sorted([f for f in src.iterdir() if f.name.endswith("_keypoints.npy")])
+        print(f"\n{folder}: {len(files)} files")
+
+        for f in files:
             total += 1
-            keypoints = np.load(str(npy_file))
-            result = preprocess(keypoints)
-            
+            kp = np.load(str(f))
+            result = preprocess(kp)
             if result is not None:
-                output_name = npy_file.stem.replace("_keypoints", "_preprocessed") + ".npy"
-                np.save(str(output_dir / output_name), result)
+                np.save(str(out / (f.stem.replace("_keypoints", "_preprocessed") + ".npy")), result)
                 successful += 1
-                print(f"  {npy_file.stem}: {len(keypoints)} -> {len(result)} frames")
+                print(f"  {f.stem}: {len(kp)} -> {len(result)} frames")
             else:
-                print(f"  {npy_file.stem}: FAILED")
-    
-    print(f"\n{'=' * 60}")
-    print(f"COMPLETE: {successful}/{total} successful")
+                print(f"  {f.stem}: failed")
+
+    print(f"\ndone: {successful}/{total}")
 
 
 if __name__ == "__main__":

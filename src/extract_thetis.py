@@ -1,6 +1,6 @@
 """
-Extracts keypoints from THETIS expert players (p32-p55)
-via MediaPipe Pose.
+Extract keypoints for THETIS expert players (p32-p55) only,
+using MediaPipe Pose. Beginners are handled by extract_thetis_beginners.py.
 """
 
 import cv2
@@ -30,131 +30,93 @@ def is_expert(filename):
         return False
 
 
-def extract_keypoints_from_video(video_path, min_detection_confidence=0.5, min_tracking_confidence=0.5):
+def extract_keypoints(video_path):
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        print(f"  ERROR: Could not open {video_path}")
+        print(f"  could not open {video_path}")
         return None, None, 0, 0
 
     fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    all_keypoints = []
-    detected_frames = 0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    kps, detected = [], 0
 
     with mp_pose.Pose(static_image_mode=False, model_complexity=2,
-                      min_detection_confidence=min_detection_confidence,
-                      min_tracking_confidence=min_tracking_confidence) as pose:
+                      min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            results = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            if results.pose_landmarks:
-                all_keypoints.append([[lm.x, lm.y] for lm in results.pose_landmarks.landmark])
-                detected_frames += 1
+            r = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            if r.pose_landmarks:
+                kps.append([[lm.x, lm.y] for lm in r.pose_landmarks.landmark])
+                detected += 1
             else:
-                all_keypoints.append([[0.0, 0.0]] * 33)
+                kps.append([[0.0, 0.0]] * 33)
 
     cap.release()
-    if not all_keypoints:
-        return None, fps, total_frames, 0
-    return np.array(all_keypoints), fps, total_frames, detected_frames
+    if not kps:
+        return None, fps, total, 0
+    return np.array(kps), fps, total, detected
 
 
 def process_thetis_experts():
-    print("=" * 60)
-    print("THETIS EXPERT KEYPOINT EXTRACTION")
-    print("=" * 60)
-    print("Processing expert players (p32-p55) only")
-    print(f"Stroke types: {list(STROKE_FOLDERS.keys())}")
-    
+    print("thetis expert extraction (p32-p55)")
     summary = []
     total_videos = 0
     successful = 0
-    skipped_beginners = 0
-    
-    for thetis_folder, our_label in STROKE_FOLDERS.items():
-        source_dir = THETIS_RGB_DIR / thetis_folder
-        output_dir = PROCESSED_DIR / our_label
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        if not source_dir.exists():
-            print(f"\nWARNING: Folder not found: {source_dir}")
+    skipped = 0
+
+    for thetis_folder, label in STROKE_FOLDERS.items():
+        src = THETIS_RGB_DIR / thetis_folder
+        out = PROCESSED_DIR / label
+        out.mkdir(parents=True, exist_ok=True)
+
+        if not src.exists():
+            print(f"  missing: {src}")
             continue
-        
-        video_files = sorted([
-            f for f in source_dir.iterdir()
-            if f.suffix.lower() in ['.avi', '.mp4', '.mov']
-        ])
-        
-        expert_videos = [f for f in video_files if is_expert(f.name)]
-        beginner_videos = len(video_files) - len(expert_videos)
-        skipped_beginners += beginner_videos
-        
-        print(f"\n--- {thetis_folder} ---")
-        print(f"  Total videos: {len(video_files)}")
-        print(f"  Expert videos: {len(expert_videos)}")
-        print(f"  Beginners skipped: {beginner_videos}")
-        
-        for video_file in expert_videos:
+
+        videos = sorted([f for f in src.iterdir()
+                         if f.suffix.lower() in ['.avi', '.mp4', '.mov']])
+        experts = [f for f in videos if is_expert(f.name)]
+        skipped += len(videos) - len(experts)
+        print(f"\n{thetis_folder}: {len(experts)} expert / {len(videos)} total")
+
+        for v in experts:
             total_videos += 1
-            print(f"\n  Processing: {video_file.name}")
-            
-            keypoints, fps, total_frames, detected_frames = extract_keypoints_from_video(video_file)
-            
-            if keypoints is not None and detected_frames > 0:
-                detection_rate = (detected_frames / total_frames) * 100 if total_frames > 0 else 0
+            kps, fps, total, detected = extract_keypoints(v)
+            if kps is None or detected == 0:
+                print(f"  {v.name}: failed")
+                continue
 
-                output_name = video_file.stem + "_keypoints.npy"
-                np.save(str(output_dir / output_name), keypoints)
+            rate = (detected / total) * 100 if total > 0 else 0
+            np.save(str(out / (v.stem + "_keypoints.npy")), kps)
+            meta = {
+                "source_video": v.name,
+                "thetis_folder": thetis_folder,
+                "stroke_type": label,
+                "player": v.stem.split("_")[0],
+                "skill_level": "expert",
+                "fps": fps,
+                "total_frames": total,
+                "detected_frames": detected,
+                "detection_rate": round(rate, 1),
+                "keypoints_shape": list(kps.shape),
+            }
+            with open(str(out / (v.stem + "_metadata.json")), "w") as f:
+                json.dump(meta, f, indent=2)
+            summary.append(meta)
+            successful += 1
+            print(f"  {v.stem}: {detected}/{total} ({rate:.1f}%)")
 
-                metadata = {
-                    "source_video": video_file.name,
-                    "thetis_folder": thetis_folder,
-                    "stroke_type": our_label,
-                    "player": video_file.stem.split("_")[0],
-                    "skill_level": "expert",
-                    "fps": fps,
-                    "total_frames": total_frames,
-                    "detected_frames": detected_frames,
-                    "detection_rate": round(detection_rate, 1),
-                    "keypoints_shape": list(keypoints.shape),
-                }
-                meta_path = output_dir / (video_file.stem + "_metadata.json")
-                with open(str(meta_path), "w") as f:
-                    json.dump(metadata, f, indent=2)
-                
-                print(f"    FPS: {fps}")
-                print(f"    Frames: {total_frames}")
-                print(f"    Pose detected: {detected_frames}/{total_frames} ({detection_rate:.1f}%)")
-                print(f"    Saved: {output_name}")
-                
-                summary.append(metadata)
-                successful += 1
-            else:
-                print(f"    FAILED: No keypoints extracted")
-    
-    print("\n" + "=" * 60)
-    print("THETIS EXTRACTION COMPLETE")
-    print("=" * 60)
-    print(f"Expert videos processed: {total_videos}")
-    print(f"Successful: {successful}")
-    print(f"Failed: {total_videos - successful}")
-    print(f"Beginner videos skipped: {skipped_beginners}")
-    
+    print(f"\ndone: {successful}/{total_videos} successful, {skipped} beginners skipped")
     if summary:
-        print(f"Average detection rate: {np.mean([s['detection_rate'] for s in summary]):.1f}%")
-
-        print("\nPer-stroke breakdown:")
+        print(f"avg detection: {np.mean([s['detection_rate'] for s in summary]):.1f}%")
         for _, label in STROKE_FOLDERS.items():
             sr = [s for s in summary if s["stroke_type"] == label]
             if sr:
-                print(f"  {label}: {len(sr)} videos, avg detection {np.mean([s['detection_rate'] for s in sr]):.1f}%")
-
-        summary_path = PROCESSED_DIR / "thetis_extraction_summary.json"
-        with open(str(summary_path), "w") as f:
+                print(f"  {label}: {len(sr)} videos, {np.mean([s['detection_rate'] for s in sr]):.1f}%")
+        with open(str(PROCESSED_DIR / "thetis_extraction_summary.json"), "w") as f:
             json.dump(summary, f, indent=2)
-        print(f"Summary saved to: {summary_path}")
 
 
 if __name__ == "__main__":

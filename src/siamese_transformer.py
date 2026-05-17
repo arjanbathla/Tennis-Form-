@@ -1,7 +1,7 @@
 """
 Siamese Transformer for stroke comparison.
-Custom encoder layer to guarantee attention weight extraction
-(PyTorch 2.8+ fast path skips hooks otherwise).
+Uses a custom encoder layer so attention weights survive — PyTorch 2.8+
+fast path skips hooks on the stock nn.TransformerEncoderLayer.
 """
 
 import numpy as np
@@ -237,12 +237,9 @@ def extract_attention_weights(model, sequence):
 
 
 def train_model(expert_seqs, beginner_seqs):
-    print(f"\n{'=' * 50}")
-    print("TRAINING SIAMESE TRANSFORMER")
-    print(f"{'=' * 50}")
-    print(f"  Device: {DEVICE}")
-    print(f"  Architecture: {NUM_LAYERS} layers, {NUM_HEADS} heads, {EMBED_DIM} dim")
-    print(f"  Epochs: {NUM_EPOCHS}, Pairs/epoch: {PAIRS_PER_EPOCH}")
+    print("\ntraining siamese")
+    print(f"  device={DEVICE}, layers={NUM_LAYERS}, heads={NUM_HEADS}, "
+          f"dim={EMBED_DIM}, epochs={NUM_EPOCHS}, pairs/epoch={PAIRS_PER_EPOCH}")
 
     expert_train, expert_val = train_test_split(expert_seqs, test_size=0.2, random_state=42)
     beginner_train, beginner_val = train_test_split(beginner_seqs, test_size=0.2, random_state=42)
@@ -259,9 +256,8 @@ def train_model(expert_seqs, beginner_seqs):
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
 
-    print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
-    print(f"\n  {'Epoch':<8} {'Train Loss':<14} {'Val Loss':<14} {'Val Acc':<10}")
-    print(f"  {'-' * 44}")
+    print(f"  params: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"\n  {'epoch':<8} {'train_loss':<14} {'val_loss':<14} {'val_acc':<10}")
 
     best_val_loss = float('inf')
     history = []
@@ -310,22 +306,21 @@ def train_model(expert_seqs, beginner_seqs):
         train_ds._generate_pairs()
         val_ds._generate_pairs()
 
-    print(f"\n  Best validation loss: {best_val_loss:.4f}")
-    model.load_state_dict(torch.load(str(MODEL_DIR / "siamese_transformer_best.pth"), map_location=DEVICE, weights_only=True))
+    print(f"\n  best val loss: {best_val_loss:.4f}")
+    model.load_state_dict(torch.load(str(MODEL_DIR / "siamese_transformer_best.pth"),
+                                     map_location=DEVICE, weights_only=True))
 
     test_attn = extract_attention_weights(model, expert_seqs[0])
     if test_attn is not None:
-        print(f"  Attention extraction: WORKING ({len(test_attn)} frames)")
+        print(f"  attention ok ({len(test_attn)} frames)")
     else:
-        print(f"  Attention extraction: NOT WORKING")
+        print("  attention extraction failed")
 
     return model, history
 
 
 def evaluate_personal(model, expert_seqs, personal_seqs, personal_names, personal_sources):
-    print(f"\n{'=' * 50}")
-    print("PERSONAL STROKE EVALUATION")
-    print(f"{'=' * 50}")
+    print("\npersonal stroke evaluation")
     model.eval()
     results = []
     ref_idx = np.random.choice(len(expert_seqs), min(10, len(expert_seqs)), replace=False)
@@ -355,22 +350,18 @@ def evaluate_personal(model, expert_seqs, personal_seqs, personal_names, persona
 
         results.append(result)
         if (i+1) % 10 == 0 or i == 0:
-            status = "with attention" if attn is not None else "NO attention"
-            print(f"  [{i+1}/{len(personal_seqs)}] {name} — Sim: {sim}% ({status})")
+            attn_ok = "attn" if attn is not None else "no-attn"
+            print(f"  [{i+1}/{len(personal_seqs)}] {name} sim={sim}% ({attn_ok})")
 
     return results
 
 
 def main():
-    print("=" * 60)
-    print("SIAMESE TRANSFORMER NETWORK")
-    print(f"Device: {DEVICE}")
-    print("=" * 60)
-
+    print(f"siamese transformer (device={DEVICE})")
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     np.random.seed(42); torch.manual_seed(42)
 
-    print("\nLoading data...")
+    print("loading...")
     expert_seqs, expert_names = [], []
     for s in ["forehand", "backhand"]:
         sq, nm = load_sequences(PREPROCESSED_DIR / "thetis" / s)
@@ -388,18 +379,19 @@ def main():
         personal_seqs.extend(sq); personal_names.extend(nm)
         personal_sources.extend([fn] * len(sq))
 
-    print(f"  Expert: {len(expert_seqs)}, Beginner: {len(beginner_seqs)}, Personal: {len(personal_seqs)}")
+    print(f"  expert={len(expert_seqs)}, beginner={len(beginner_seqs)}, personal={len(personal_seqs)}")
     if not expert_seqs or not beginner_seqs:
-        print("ERROR: Need both expert and beginner data."); return
+        print("need both expert and beginner data"); return
 
     model, history = train_model(expert_seqs, beginner_seqs)
     results = evaluate_personal(model, expert_seqs, personal_seqs, personal_names, personal_sources)
 
-    print(f"\n{'=' * 50}\nRESULTS SUMMARY\n{'=' * 50}")
-    for folder in sorted(set(r["folder"] for r in results)):
+    print("\nresults summary")
+    for folder in sorted({r["folder"] for r in results}):
         fr = [r for r in results if r["folder"] == folder]
         ac = sum(1 for r in fr if "attention_weights" in r)
-        print(f"  {folder}: {np.mean([r['siamese_similarity'] for r in fr]):.1f}% avg, {ac}/{len(fr)} with attention")
+        print(f"  {folder}: avg sim {np.mean([r['siamese_similarity'] for r in fr]):.1f}%, "
+              f"{ac}/{len(fr)} with attention")
 
     with open(str(RESULTS_DIR / "siamese_transformer_results.json"), "w") as f:
         json.dump(results, f, indent=2)
@@ -413,7 +405,7 @@ def main():
                    "batch_size": BATCH_SIZE, "epochs": NUM_EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
                    "total_parameters": sum(p.numel() for p in model.parameters())}, f, indent=2)
 
-    print(f"\n{'=' * 60}\nCOMPLETE\n{'=' * 60}")
+    print("\ndone")
 
 if __name__ == "__main__":
     main()

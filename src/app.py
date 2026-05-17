@@ -735,10 +735,11 @@ def base_layout(title="", height=400, showlegend=True):
 
 
 def run_integrity_check():
-    """Check that all five methods use the same test set and consistent thresholds."""
+    # startup guard: confirm unified_evaluation is looking at the same 83-sample
+    # split, the same pos_label, and the same thresholds across all five methods.
     issues = []
 
-    # rebuild the same sample list + split used by unified_evaluation
+    # rebuild the sample list + split used by unified_evaluation
     samples = []
     for stroke in ["forehand", "backhand"]:
         for level, label in [("thetis", "expert"), ("thetis_beginners", "beginner")]:
@@ -758,7 +759,6 @@ def run_integrity_check():
                                   stratify=labels, random_state=42)
     expected_n = len(idx_te)
 
-    # 1 — check unified_comparison.csv has exactly 83 rows per method
     csv_path = RESULTS_DIR / "unified_comparison.csv"
     if csv_path.exists():
         udf = pd.read_csv(csv_path)
@@ -775,13 +775,14 @@ def run_integrity_check():
     if expected_n != 83:
         issues.append(f"test split produced {expected_n} samples, expected 83")
 
-    # 2 — positive class must be 'expert' everywhere
+    # pos_label must be 'expert' in unified_evaluation
     import inspect
     src_app = inspect.getsource(unified_evaluation)
     if "pos_label=\"expert\"" not in src_app and "pos_label='expert'" not in src_app:
         issues.append("unified_evaluation may not use pos_label='expert'")
 
-    # 3 — DTW threshold sim > 50 and siamese threshold d < 0.5
+    # DTW sim > 50 and siamese d < 0.5 must appear at least twice in this file
+    # (once in unified_evaluation, once in the live Analyse My Stroke branch)
     app_src = Path(__file__).read_text()
     dtw_thresh_count = app_src.count("sim > 50")
     siam_thresh_count = app_src.count("< 0.5")
@@ -790,12 +791,11 @@ def run_integrity_check():
     if siam_thresh_count < 2:
         issues.append(f"Siamese threshold '< 0.5' found {siam_thresh_count} times, expected at least 2")
 
-    # print summary
     print("")
     if not issues:
-        print(f"Evaluation consistency check: PASSED (n={expected_n}, 5 methods, pos_class=expert, thresholds ok)")
+        print(f"[integrity] ok — n={expected_n}, 5 methods, pos=expert, thresholds match")
     else:
-        print("Evaluation consistency check: FAILED")
+        print("[integrity] FAIL")
         for iss in issues:
             print(f"  - {iss}")
     print("")

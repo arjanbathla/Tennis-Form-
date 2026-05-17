@@ -1,8 +1,5 @@
-import cv2
-import mediapipe as mp
-import numpy as np
+import cv2, mediapipe as mp, numpy as np
 
-print("OpenCV version:", cv2.__version__)
-print("MediaPipe imported successfully")
-print("NumPy version:", np.__version__)
-print("Everything is working!")
+print("cv2", cv2.__version__)
+print("numpy", np.__version__)
+print("mediapipe", mp.__version__)

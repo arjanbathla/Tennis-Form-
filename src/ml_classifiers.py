@@ -115,13 +115,10 @@ def load_dataset(folder_path, label):
 
 
 def main():
-    print("=" * 60)
-    print("TENNIS STROKE ML CLASSIFICATION")
-    print("=" * 60)
-
+    print("ml classification")
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("\nLoading data...")
+    print("loading data...")
     all_features, all_labels, all_names, all_sources = [], [], [], []
     feat_names = None
 
@@ -135,7 +132,7 @@ def main():
                 feat_names = fn
 
     expert_count = len(all_features)
-    print(f"  THETIS expert samples: {expert_count}")
+    print(f"  thetis expert: {expert_count}")
 
     for stroke in ["forehand", "backhand"]:
         feats, labels, names, _ = load_dataset(PREPROCESSED_DIR / "thetis_beginners" / stroke, "beginner")
@@ -145,10 +142,10 @@ def main():
             all_sources.extend([f"thetis_beginner_{stroke}"] * len(feats))
 
     beginner_count = len(all_features) - expert_count
-    print(f"  THETIS beginner samples: {beginner_count}")
+    print(f"  thetis beginner: {beginner_count}")
 
     if expert_count == 0 or beginner_count == 0:
-        print("\nERROR: Need both expert and beginner data. Run extract_thetis_beginners.py and preprocess_thetis_beginners.py first.")
+        print("need both expert and beginner data — run extract_thetis_beginners then preprocess_thetis_beginners first")
         return
 
     personal_folders = [
@@ -165,7 +162,7 @@ def main():
             personal_names.extend(names)
             personal_sources.extend([folder_name] * len(feats))
 
-    print(f"  Personal samples (for prediction): {len(personal_features)}")
+    print(f"  personal: {len(personal_features)}")
 
     X = np.nan_to_num(np.array(all_features), nan=0.0, posinf=0.0, neginf=0.0)
     y = np.array(all_labels)
@@ -176,12 +173,10 @@ def main():
     X_train, X_test = X[idx_tr], X[idx_te]
     y_train, y_test = y[idx_tr], y[idx_te]
 
-    print(f"\nTotal: {X.shape[0]}, Train: {len(idx_tr)}, Test: {len(idx_te)}")
+    print(f"\ntotal={X.shape[0]}, train={len(idx_tr)}, test={len(idx_te)}")
     print(f"  expert={np.sum(y == 'expert')}, beginner={np.sum(y == 'beginner')}")
 
-    print(f"\n{'=' * 50}")
-    print("HYPERPARAMETER TUNING (GridSearchCV on training set)")
-    print(f"{'=' * 50}")
+    print("\ngridsearch (5-fold cv on training set)")
 
     param_grids = {
         "Random Forest": {
@@ -216,7 +211,7 @@ def main():
     trained_models = {}
 
     for name, clf in base_clfs.items():
-        print(f"\n--- {name} ---")
+        print(f"\n{name}")
 
         pipeline = Pipeline([("scaler", StandardScaler()), ("classifier", clf)])
         gs = GridSearchCV(pipeline, param_grids[name], cv=5, scoring="accuracy", n_jobs=-1)
@@ -231,17 +226,13 @@ def main():
         y_pred_test = best_pipe.predict(X_test)
         report_train = classification_report(y_train, y_pred_train, output_dict=True)
         report_test = classification_report(y_test, y_pred_test, output_dict=True)
-        print(f"  Training accuracy: {report_train['accuracy']:.3f}")
-        print(f"  Test accuracy: {report_test['accuracy']:.3f}")
-        print(f"  Test Expert p/r: {report_test['expert']['precision']:.3f} / {report_test['expert']['recall']:.3f}")
-        print(f"  Test Beginner p/r: {report_test['beginner']['precision']:.3f} / {report_test['beginner']['recall']:.3f}")
+        print(f"  train acc: {report_train['accuracy']:.3f}  test acc: {report_test['accuracy']:.3f}")
+        print(f"  test expert p/r: {report_test['expert']['precision']:.3f}/{report_test['expert']['recall']:.3f}  "
+              f"beginner p/r: {report_test['beginner']['precision']:.3f}/{report_test['beginner']['recall']:.3f}")
 
         cm = confusion_matrix(y_test, y_pred_test, labels=["expert", "beginner"])
-        print(f"  Test confusion matrix:")
-        print(f"                 Predicted")
-        print(f"                 Expert  Beginner")
-        print(f"    Actual Expert   {cm[0][0]:>4}    {cm[0][1]:>4}")
-        print(f"    Actual Beginner {cm[1][0]:>4}    {cm[1][1]:>4}")
+        print(f"  cm (rows=actual E/B, cols=pred E/B): "
+              f"[[{cm[0][0]}, {cm[0][1]}], [{cm[1][0]}, {cm[1][1]}]]")
 
         results_summary[name] = {
             "cv_accuracy_mean": round(float(gs.best_score_), 4),
@@ -269,7 +260,7 @@ def main():
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     for name, ens in ensembles.items():
-        print(f"\n--- {name} ---")
+        print(f"\n{name}")
         scores = cross_val_score(ens, X_train, y_train, cv=cv, scoring="accuracy")
         print(f"  CV accuracy: {scores.mean():.3f} (+/- {scores.std():.3f})")
 
@@ -280,17 +271,13 @@ def main():
         y_pred_test = ens.predict(X_test)
         report_train = classification_report(y_train, y_pred_train, output_dict=True)
         report_test = classification_report(y_test, y_pred_test, output_dict=True)
-        print(f"  Training accuracy: {report_train['accuracy']:.3f}")
-        print(f"  Test accuracy: {report_test['accuracy']:.3f}")
-        print(f"  Test Expert p/r: {report_test['expert']['precision']:.3f} / {report_test['expert']['recall']:.3f}")
-        print(f"  Test Beginner p/r: {report_test['beginner']['precision']:.3f} / {report_test['beginner']['recall']:.3f}")
+        print(f"  train acc: {report_train['accuracy']:.3f}  test acc: {report_test['accuracy']:.3f}")
+        print(f"  test expert p/r: {report_test['expert']['precision']:.3f}/{report_test['expert']['recall']:.3f}  "
+              f"beginner p/r: {report_test['beginner']['precision']:.3f}/{report_test['beginner']['recall']:.3f}")
 
         cm = confusion_matrix(y_test, y_pred_test, labels=["expert", "beginner"])
-        print(f"  Test confusion matrix:")
-        print(f"                 Predicted")
-        print(f"                 Expert  Beginner")
-        print(f"    Actual Expert   {cm[0][0]:>4}    {cm[0][1]:>4}")
-        print(f"    Actual Beginner {cm[1][0]:>4}    {cm[1][1]:>4}")
+        print(f"  cm (rows=actual E/B, cols=pred E/B): "
+              f"[[{cm[0][0]}, {cm[0][1]}], [{cm[1][0]}, {cm[1][1]}]]")
 
         results_summary[name] = {
             "cv_accuracy_mean": round(float(scores.mean()), 4),
@@ -300,9 +287,7 @@ def main():
             "confusion_matrix": cm.tolist(),
         }
 
-    print(f"\n{'=' * 50}")
-    print("TOP 15 MOST IMPORTANT FEATURES (Random Forest)")
-    print(f"{'=' * 50}")
+    print("\ntop 15 features (RF importance)")
 
     rf_model = trained_models["Random Forest"].named_steps["classifier"]
     importances = rf_model.feature_importances_
@@ -313,9 +298,7 @@ def main():
         print(f"  {rank+1:>2}. {feat_names[idx]:<35} {importances[idx]:.4f}  {bar}")
     
     if personal_features:
-        print(f"\n{'=' * 50}")
-        print("PREDICTIONS ON PERSONAL RECORDINGS")
-        print(f"{'=' * 50}")
+        print("\npredictions on personal recordings")
 
         X_personal = np.nan_to_num(np.array(personal_features), nan=0.0, posinf=0.0, neginf=0.0)
         personal_results = []
@@ -323,15 +306,15 @@ def main():
         for model_name, pipeline in trained_models.items():
             preds = pipeline.predict(X_personal)
             probs = pipeline.predict_proba(X_personal)
-            print(f"\n--- {model_name} ---")
-            print(f"  Expert: {np.sum(preds == 'expert')}/{len(preds)}, Beginner: {np.sum(preds == 'beginner')}/{len(preds)}")
+            print(f"\n{model_name}: "
+                  f"expert={np.sum(preds=='expert')}/{len(preds)}, "
+                  f"beginner={np.sum(preds=='beginner')}/{len(preds)}")
 
             for folder_name in personal_folders:
                 mask = [s == folder_name for s in personal_sources]
                 fp = preds[mask]
                 if len(fp) > 0:
-                    pct = np.mean(fp == "expert") * 100
-                    print(f"    {folder_name}: {pct:.0f}% expert")
+                    print(f"    {folder_name}: {np.mean(fp == 'expert') * 100:.0f}% expert")
 
             expert_idx = np.where(pipeline.classes_ == "expert")[0][0]
             for i, (name, source, pred) in enumerate(zip(personal_names, personal_sources, preds)):
@@ -344,22 +327,18 @@ def main():
         pred_path = RESULTS_DIR / "ml_personal_predictions.json"
         with open(str(pred_path), "w") as f:
             json.dump(personal_results, f, indent=2)
-        print(f"\nPersonal predictions saved to: {pred_path}")
+        print(f"\npersonal preds -> {pred_path}")
 
     results_path = RESULTS_DIR / "ml_classification_results.json"
     with open(str(results_path), "w") as f:
         json.dump(results_summary, f, indent=2)
-    print(f"\nClassification results saved to: {results_path}")
+    print(f"results -> {results_path}")
 
     imp_path = RESULTS_DIR / "feature_importance.json"
     with open(str(imp_path), "w") as f:
         json.dump([{"feature": feat_names[i], "importance": round(float(importances[i]), 6)}
                    for i in importance_indices], f, indent=2)
-    print(f"Feature importance saved to: {imp_path}")
-
-    print(f"\n{'=' * 60}")
-    print("ML CLASSIFICATION COMPLETE")
-    print(f"{'=' * 60}")
+    print(f"importance -> {imp_path}")
 
 
 if __name__ == "__main__":
